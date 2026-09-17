@@ -18,6 +18,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<AdapterDisplay> Ethernet { get; } = [];
     public ObservableCollection<WifiDisplay> Wifi { get; } = [];
     public ObservableCollection<ProcessDisplay> Applications { get; } = [];
+    public ObservableCollection<AppTrafficDisplay> LiveApplicationTraffic { get; } = [];
     public ObservableCollection<string> Events { get; } = [];
     public ObservableCollection<string> Usage { get; } = [];
     public ObservableCollection<double?> Downloads { get; } = [];
@@ -28,6 +29,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private AdapterSnapshot? selected;
     private readonly Dictionary<string, (long Down, long Up)> session = [];
     private MonitoringSnapshot? latest;
+    private ServiceSnapshot appTraffic = ServiceSnapshot.Unavailable("Not checked yet.");
     public IReadOnlyList<ProcessConnections> Processes => latest?.Applications ?? [];
     public AdapterSnapshot? Selected
     {
@@ -52,6 +54,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string AddressDetail => selected is null ? "Unavailable" : selected.Addresses.Length == 0 ? "Address collection disabled or no addresses available" : $"IP: {string.Join(", ", selected.Addresses)}\nGateway: {string.Join(", ", selected.Gateways)}\nDNS: {string.Join(", ", selected.DnsServers)}";
     public string DiagnosticText { get; set; } = "No diagnostic run yet. Tests send DNS queries and 10 ICMP echo requests to the target you choose.";
     public string LastUpdated => latest is null ? "Waiting" : $"Updated {latest.Timestamp.ToLocalTime():HH:mm:ss} · every 2 seconds";
+    public bool ApplicationTrafficAvailable => appTraffic.Availability == "Measured";
+    public string ApplicationTrafficStatus => ApplicationTrafficAvailable
+        ? $"Live · updated {appTraffic.Timestamp.ToLocalTime():HH:mm:ss} · {appTraffic.WindowDuration.TotalSeconds:0}s window · events lost this window: {appTraffic.EventsLost} · {appTraffic.Applications.Count} processes"
+        : $"{appTraffic.Availability} · {appTraffic.Detail}";
     public MainViewModel()
     {
         Series = [new LineSeries<double?> { Name = "Download", Values = Downloads, GeometrySize = 0, LineSmoothness = 0.25, Stroke = new SolidColorPaint(SKColor.Parse("#26D9C4"), 3), Fill = new SolidColorPaint(SKColor.Parse("#26D9C4").WithAlpha(25)) },
@@ -74,6 +80,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
         Wifi.Clear(); foreach (var item in snapshot.Wifi) Wifi.Add(new(item));
         if (snapshot.Error is not null) Status = snapshot.Error;
         Changed(nameof(LastUpdated));
+    }
+    public void ApplyApplicationTraffic(ServiceSnapshot snapshot)
+    {
+        appTraffic = snapshot;
+        LiveApplicationTraffic.Clear();
+        foreach (var sample in snapshot.Applications.Take(50)) LiveApplicationTraffic.Add(new(sample));
+        Changed(nameof(ApplicationTrafficAvailable));
+        Changed(nameof(ApplicationTrafficStatus));
     }
     public void FilterApplications(string query)
     {
@@ -108,4 +122,10 @@ public sealed record ProcessDisplay(ProcessConnections Value)
     public string Name => Value.Name;
     public string Summary => $"PID {Value.Pid} · TCP {Value.TcpConnections} · UDP {Value.UdpEndpoints} · started {Value.StartedAt?.ToLocalTime().ToString("g") ?? "unavailable"}";
     public string Detail => $"{Value.Availability} · {Value.Detail}";
+}
+public sealed record AppTrafficDisplay(ApplicationTrafficSample Value)
+{
+    public string Name => Value.ProcessName;
+    public string Summary => $"PID {Value.Pid} · ↓ {MainViewModel.FormatRate(Value.ReceivedBytesPerSecond)} · ↑ {MainViewModel.FormatRate(Value.SentBytesPerSecond)}";
+    public string Detail => $"Window total: ↓ {MainViewModel.Bytes(Value.ReceivedBytesTotal)}  ↑ {MainViewModel.Bytes(Value.SentBytesTotal)} · {Value.Events} events · {Value.WindowStart.ToLocalTime():T}–{Value.WindowEnd.ToLocalTime():T}";
 }

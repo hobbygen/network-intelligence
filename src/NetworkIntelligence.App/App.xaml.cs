@@ -31,6 +31,7 @@ public partial class App : Microsoft.UI.Xaml.Application
         collection.AddOptions<AppSettings>();
         collection.AddSingleton<INetworkCollector, NetworkCollector>();
         collection.AddSingleton<IHistoryStore>(new SqliteHistoryStore(Path.Combine(DataDirectory, "network-intelligence.db")));
+        collection.AddSingleton<IApplicationTrafficClient, MonitoringServiceClient>();
         collection.AddSingleton<MonitoringService>();
         collection.AddSingleton<Diagnostics>();
         collection.AddSingleton<TransferTest>();

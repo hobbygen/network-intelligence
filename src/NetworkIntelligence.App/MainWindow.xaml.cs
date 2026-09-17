@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window
         };
         monitoring.Status += message => DispatcherQueue.TryEnqueue(() => ViewModel.Status = message);
         monitoring.ConnectionsChanged += events => DispatcherQueue.TryEnqueue(() => ConnectionChanges(events));
+        monitoring.ApplicationTraffic += snapshot => DispatcherQueue.TryEnqueue(() => ViewModel.ApplyApplicationTraffic(snapshot));
     }
     private async void WindowLoaded(object sender, RoutedEventArgs e)
     {
@@ -76,6 +77,9 @@ public sealed partial class MainWindow : Window
             {
                 await Task.Delay(8000);
                 await LoadHistoryAsync();
+                var pageArgs = Environment.GetCommandLineArgs();
+                int pageIndex = Array.IndexOf(pageArgs, "--smoke-page");
+                if (pageIndex >= 0 && pageIndex + 1 < pageArgs.Length) ShowPage(pageArgs[pageIndex + 1]);
                 var result = new { Adapters = ViewModel.Adapters.Count, PersistedAdapters = usage.Count, Integrity = await Task.Run(() => store.CheckIntegrityAsync(CancellationToken.None)), ViewModel.Status };
                 await File.WriteAllTextAsync(Path.Combine(App.DataDirectory, "smoke-result.json"), JsonSerializer.Serialize(result));
                 // Render the app's own visual tree for layout verification in automated test runs.

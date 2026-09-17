@@ -58,6 +58,17 @@ This validates the IPC and continuous-collection design end to end. It is not an
 
 `--accuracy-test-mib` sent exact, independently-tallied 1 MiB and 100 MiB transfers over a loopback TCP socket and compared them against the MonitoringService's ETW-attributed totals for the same PID: **0% delta in both directions at both sizes, 0 events lost.** Narrow scope — loopback, single process, single connection, high throughput; concurrent processes, real adapters, UDP-against-reference and low-rate/long-duration cases remain open.
 
+## App-wired MonitoringService client, visual verification (2026-09-17, see `docs/DECISIONS.md` ADR-009)
+
+Extended `--smoke-test` with `--smoke-page <name>` to render a chosen page (previously Dashboard only) and captured the Application Usage page in both states:
+
+| Scenario | Result |
+|---|---|
+| Service not running (default state) | No crash; "Live per-application bandwidth" card correctly shows "Unavailable · Monitoring service not reachable — it may not be installed or not running."; socket-ownership list below it unaffected |
+| Service running elevated | Card shows real live data: 12 processes, `0 events lost this window`, correct 5s window timestamps; curl-generated traffic visible by PID at ~3.2 Mbps; service log confirms repeated authorized `hp` connections at the expected ~4s poll cadence |
+
+Both renders produced via `dotnet run --project src/NetworkIntelligence.App -- --smoke-test --data-dir <dir> --smoke-page Applications`, screenshots reviewed directly. This is UI-wiring verification, not a UI automation test suite (spec section 16.2 still open) and not an accuracy claim beyond ADR-008's narrow loopback result.
+
 ## Remaining acceptance work
 
 Controlled known-byte-traffic comparison for concurrent processes, real/physical adapters, UDP against a byte-exact reference, and low-rate/long-duration traffic; adapter disambiguation for per-process events; process-restart attribution; ETW session CPU/memory overhead benchmark; Wi-Fi SSID/signal/channel/security; internet/gateway reachability; adapter switching/sleep; MonitoringService code signing, dedicated least-privileged service account, automated unauthorized-client access tests, and a real client wired into the main App/Infrastructure; Windows 10 and clean Windows 11 installs; storage/migrations/retention; speed provider integration; UI behavior/accessibility; anomaly detection; long-duration/high-throughput benchmarks; signed release packaging.

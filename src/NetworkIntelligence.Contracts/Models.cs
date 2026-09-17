@@ -62,3 +62,10 @@ public interface IHistoryStore
     Task DeleteHistoryAsync(CancellationToken token);
     Task<string> CheckIntegrityAsync(CancellationToken token);
 }
+/// <summary>Talks to the optional, elevated MonitoringService (docs/DECISIONS.md ADR-007) over its named pipe.
+/// Never throws: any failure to reach the service — not installed, not running, access denied — is reported as
+/// an Unavailable <see cref="ServiceSnapshot"/>, the same way every other collector in this app degrades.</summary>
+public interface IApplicationTrafficClient
+{
+    Task<ServiceSnapshot> GetSnapshotAsync(CancellationToken token);
+}

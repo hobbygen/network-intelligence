@@ -95,7 +95,7 @@ Use a WinUI NavigationView, resizable main content, system/light/dark theme, key
 | Wi-Fi | Interface selection, connection/security/signal details, permission guidance and unavailable states |
 | Network Performance | Target selection, ICMP/DNS history, manual speed test with provider/data warning/cancel |
 | Bandwidth & Data Usage | Interval and adapter selection, daily/weekly/monthly/year aggregation, CSV/JSON |
-| Application Usage | Search/sort/filter, source/quality, directional traffic, detail history, trust/exclude; unavailable until validated |
+| Application Usage | Socket-ownership search/sort/filter implemented; live per-app bandwidth now wired to the optional MonitoringService (ADR-009), gated behind manual install and clearly marked not accuracy-certified; persisted history, sort/filter on live data, trust/exclude still pending |
 | Connection History | Timestamped transitions, adapter context and correlated diagnostic evidence |
 | Diagnostics | Explicit bounded tests, progress/cancel, factual results, export; no automatic fixes |
 | Settings | Retention, privacy, targets, alerts/quiet hours, sensitivity, exclusions, theme, service status, delete data |

@@ -2,10 +2,11 @@ using Microsoft.Extensions.Logging;
 using NetworkIntelligence.Contracts;
 namespace NetworkIntelligence.Application;
 
-public sealed class MonitoringService(INetworkCollector collector, IHistoryStore store, ILogger<MonitoringService> logger) : IAsyncDisposable
+public sealed class MonitoringService(INetworkCollector collector, IHistoryStore store, IApplicationTrafficClient applicationTraffic, ILogger<MonitoringService> logger) : IAsyncDisposable
 {
     private readonly CancellationTokenSource stop = new();
     private Task? worker;
+    private Task? applicationTrafficWorker;
     private AppSettings settings = new();
     private volatile bool paused;
     private volatile bool resetRequested;
@@ -15,12 +16,30 @@ public sealed class MonitoringService(INetworkCollector collector, IHistoryStore
     public event Action<MonitoringSnapshot>? Snapshot;
     public event Action<IReadOnlyList<ConnectionEvent>>? ConnectionsChanged;
     public event Action<string>? Status;
+    /// <summary>Polled independently of adapter collection (docs/DECISIONS.md ADR-007) so a slow or unreachable
+    /// optional service can never delay adapter monitoring or history writes.</summary>
+    public event Action<ServiceSnapshot>? ApplicationTraffic;
     public bool IsPaused => paused;
     public AppSettings Settings => settings;
     public void UpdateSettings(AppSettings value) { value.Validate(); Interlocked.Exchange(ref settings, value); resetRequested = true; }
     public void SetPaused(bool value) { paused = value; Status?.Invoke(value ? "Monitoring paused · live values are stale" : "Monitoring resumed"); }
-    public void Start() => worker ??= Task.Run(RunAsync);
+    public void Start() { worker ??= Task.Run(RunAsync); applicationTrafficWorker ??= Task.Run(RunApplicationTrafficAsync); }
     public void ResetSession() => resetSessionRequested = true;
+    private async Task RunApplicationTrafficAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(4));
+        try
+        {
+            do
+            {
+                if (paused) continue;
+                var snapshot = await applicationTraffic.GetSnapshotAsync(stop.Token);
+                ApplicationTraffic?.Invoke(snapshot);
+            } while (await timer.WaitForNextTickAsync(stop.Token));
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+        catch (Exception ex) { logger.LogError("Application traffic polling stopped: {Type}", ex.GetType().Name); }
+    }
     private async Task RunAsync()
     {
         int tick = 0; bool wasPaused = false; var nextCleanup = DateTimeOffset.MinValue;
@@ -75,6 +94,7 @@ public sealed class MonitoringService(INetworkCollector collector, IHistoryStore
     {
         await stop.CancelAsync();
         if (worker is not null) await worker;
+        if (applicationTrafficWorker is not null) await applicationTrafficWorker;
         stop.Dispose();
     }
 }

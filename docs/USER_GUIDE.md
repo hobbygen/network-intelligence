@@ -28,7 +28,9 @@ These rates describe individual HTTP transfers including request/server overhead
 
 ## Applications and alerts
 
-Application usage currently shows IPv4/IPv6 TCP/UDP socket ownership, PID and process start time where accessible. Socket counts do not measure bytes or bandwidth. Names can be hidden in Settings. Process exits/access restrictions have explicit states. No application history is stored. Per-application traffic, trust controls, learned baselines, bandwidth anomalies and health scoring remain unavailable pending validation.
+Application usage always shows IPv4/IPv6 TCP/UDP socket ownership, PID and process start time where accessible. Socket counts do not measure bytes or bandwidth. Names can be hidden in Settings. Process exits/access restrictions have explicit states. No application history is stored.
+
+Live per-application download/upload rates are also shown, but only when the separate, optional `NetworkIntelligence.MonitoringService` is installed and running (see the README) — it is off by default, requires an administrator to install it, and the app works fully without it. When the service isn't running, that section of the page simply reads "Unavailable." Its numbers have only been validated against a controlled, single-process, loopback test (`docs/ETW_ACCURACY.md`); treat them as indicative, not certified for accuracy in general use yet. Trust controls, learned baselines, bandwidth anomalies, persisted per-app history and a health score remain unavailable pending further validation.
 
 Connection alerts use Windows native tray notifications for observed adapter disconnects. Settings include quiet hours and alert enablement; cooldown is five minutes per adapter. Equal start/end quiet hours mean all-day quiet. Notification delivery also depends on Windows notification settings. There are no application-bandwidth alerts yet.
 
