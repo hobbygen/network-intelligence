@@ -33,6 +33,7 @@ public partial class App : Microsoft.UI.Xaml.Application
         collection.AddSingleton<IHistoryStore>(new SqliteHistoryStore(Path.Combine(DataDirectory, "network-intelligence.db")));
         collection.AddSingleton<IApplicationTrafficClient, MonitoringServiceClient>();
         collection.AddSingleton<MonitoringService>();
+        collection.AddSingleton<AnomalyDetectionService>();
         collection.AddSingleton<Diagnostics>();
         collection.AddSingleton<TransferTest>();
         collection.AddSingleton<MainWindow>();

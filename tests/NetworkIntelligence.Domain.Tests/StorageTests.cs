@@ -83,10 +83,43 @@ public sealed class StorageTests : IAsyncLifetime
         path = Path.Combine(directory, "app-export.csv"); await ExportService.WriteApplicationUsageAsync(path, rows, false, default);
         Assert.Contains("sample.exe", await File.ReadAllTextAsync(path));
     }
+    [Fact] public async Task ApplicationMinuteSeriesGroupsAcrossPidsSharingAProcessName()
+    {
+        var minute = new DateTimeOffset(2026, 1, 1, 12, 0, 30, TimeSpan.Zero);
+        // Two different PIDs both named "chrome" in the same minute — should sum into one series point,
+        // matching "multiple processes belonging to one application" (requirements section 10.1).
+        await store.SaveApplicationTrafficAsync(ServiceSample(minute, 100, "chrome", 1000, 100), default);
+        await store.SaveApplicationTrafficAsync(ServiceSample(minute, 200, "chrome", 500, 50), default);
+        var series = await store.GetApplicationMinuteSeriesAsync("chrome", DateTimeOffset.MinValue, default);
+        var point = Assert.Single(series);
+        Assert.Equal(1500, point.ReceivedBytes); Assert.Equal(150, point.SentBytes); Assert.Equal(5.0, point.CoveredSeconds); // one 5s window each, same minute
+    }
+    [Fact] public async Task AnomalyEventsPersistAndListNewestFirst()
+    {
+        var now = DateTimeOffset.UtcNow;
+        long firstId = await store.SaveAnomalyEventAsync(new(0, now.AddMinutes(-1), "chrome", "Download", "High", 20_000_000, 2_000_000, 4.5, "test explanation", true), default);
+        long secondId = await store.SaveAnomalyEventAsync(new(0, now, "svchost", "Upload", "Low", 500_000, 100_000, 3.1, "another", false), default);
+        Assert.True(secondId > firstId);
+        var rows = await store.GetAnomalyEventsAsync(10, default);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("svchost", rows[0].ProcessName); Assert.False(rows[0].Notified); // newest first
+        Assert.Equal("chrome", rows[1].ProcessName); Assert.True(rows[1].Notified);
+    }
+    [Fact] public async Task AnomalyEventRetentionAndDeletionMatchOtherHistory()
+    {
+        await store.SaveAnomalyEventAsync(new(0, DateTimeOffset.UtcNow.AddDays(-400), "old.exe", "Download", "Low", 1, 1, 1, "x", false), default);
+        await store.SaveAnomalyEventAsync(new(0, DateTimeOffset.UtcNow, "recent.exe", "Download", "Low", 1, 1, 1, "x", false), default);
+        await store.CleanupAsync(365, default);
+        Assert.Equal("recent.exe", Assert.Single(await store.GetAnomalyEventsAsync(10, default)).ProcessName);
+        await store.DeleteHistoryAsync(default);
+        Assert.Empty(await store.GetAnomalyEventsAsync(10, default));
+    }
     [Theory] [InlineData("=1+1")] [InlineData(" +cmd")] [InlineData("@formula")]
     public void CsvPreventsSpreadsheetFormulaInterpretation(string text) => Assert.StartsWith("\"'", ExportService.Csv(text));
     [Theory] [InlineData(0)] [InlineData(3651)]
     public void SettingsRejectInvalidRetention(int days) => Assert.Throws<ArgumentException>(() => (new AppSettings { RetentionDays = days }).Validate());
+    [Theory] [InlineData(1.0)] [InlineData(6.1)]
+    public void SettingsRejectInvalidAnomalySensitivity(double sensitivity) => Assert.Throws<ArgumentException>(() => (new AppSettings { AnomalySensitivity = sensitivity }).Validate());
     [Fact] public async Task LiveAdapterCollectorDoesNotExposePrivateFieldsByDefault()
     {
         if (!OperatingSystem.IsWindows()) return;

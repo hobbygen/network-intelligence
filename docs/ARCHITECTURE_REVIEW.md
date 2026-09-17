@@ -95,7 +95,7 @@ Use a WinUI NavigationView, resizable main content, system/light/dark theme, key
 | Wi-Fi | Interface selection, connection/security/signal details, permission guidance and unavailable states |
 | Network Performance | Target selection, ICMP/DNS history, manual speed test with provider/data warning/cancel |
 | Bandwidth & Data Usage | Interval and adapter selection, daily/weekly/monthly/year aggregation, CSV/JSON |
-| Application Usage | Socket-ownership search/sort/filter implemented; live per-app bandwidth now wired to the optional MonitoringService (ADR-009), gated behind manual install and clearly marked not accuracy-certified; persisted history, sort/filter on live data, trust/exclude still pending |
+| Application Usage | Socket-ownership search/sort/filter implemented; live and stored per-app bandwidth wired to the optional MonitoringService (ADR-009/010), gated behind manual install and clearly marked not accuracy-certified; trust exclusion implemented (ADR-011); sort/filter on live/stored data, untrust control still pending |
 | Connection History | Timestamped transitions, adapter context and correlated diagnostic evidence |
 | Diagnostics | Explicit bounded tests, progress/cancel, factual results, export; no automatic fixes |
 | Settings | Retention, privacy, targets, alerts/quiet hours, sensitivity, exclusions, theme, service status, delete data |
@@ -104,7 +104,7 @@ Tray: show, status, pause/resume, diagnostics, settings, exit. Closing-to-tray b
 
 ## Anomaly and health design
 
-Proposed balanced defaults: seven observed days plus at least 60 valid active intervals before learned-baseline alerts; compare upload/download separately using rolling median, MAD and percentile envelope. Require minimum bandwidth and at least 30 seconds of sustained deviation, then cooldown per app/direction. These are starting parameters for false-positive testing, not validated product defaults. Exclude trusted apps before alert emission. Freeze or robustly limit anomalous samples entering baseline. Persist model version and confidence. Missing/low-quality data must not train or trigger. Quiet hours suppress notifications, not evidence storage. Explain rates, baseline, duration and quality; never imply malware.
+**Implemented** (docs/DECISIONS.md ADR-011), with one deliberate deviation from this section's original proposal: baselines use Welford mean/stddev with one outlier-trimmed re-pass, not rolling median/MAD/percentile envelope — simpler and fully unit-testable, chosen as a documented v1 simplification rather than the richer statistic sketched here. Everything else matches the proposal: seven observed days plus at least 60 valid active intervals before learned-baseline alerts (`ApplicationBaseline`/`AnomalyEvaluator`, `NetworkIntelligence.Domain`); upload/download evaluated independently; minimum bandwidth floor and 30 seconds of sustained deviation before cooldown-gated firing (`AnomalyTracker`, `NetworkIntelligence.Application`); trusted apps excluded before evaluation; outlier trimming on baseline ingestion; quiet hours suppress notification only, never the persisted `AnomalyEvent` row (schema version 3). These remain the **provisional parameters proposed here, not validated against a real false-positive rate** — that needs days-to-weeks of live usage data and is tracked as outstanding in `docs/VALIDATION_PLAN.md`. Model version/confidence persistence and a percentile-based baseline are not implemented; sensitivity is user-configurable, the other four thresholds are not yet.
 
 Health needs a documented weighting model and minimum coverage. Propose no score without a reachability test and sufficient latency/loss observations. Display contributing available factors and omitted inputs; do not silently award perfect points for missing Wi-Fi/errors/disconnect history. Final weights require scenario tests.
 
@@ -114,7 +114,7 @@ Health needs a documented weighting model and minimum coverage. Propose no score
 2. Phase 1: complete API experiments, ETW controlled traffic validation, privilege/overhead measurements, Windows compatibility matrix; review decisions with owner.
 3. Phases 2–3: approved WinUI shell/tray/settings, isolated collectors and SQLite.
 4. Phases 4–5: diagnostics/provider integration, charts/aggregation/exports.
-5. Phases 6–7: only validated application accounting, then baselines/explained alerts.
+5. Phases 6–7: application accounting wired into the app (ADR-009/010) with a narrow validated accuracy case (ADR-008); baselines/explained alerts implemented (ADR-011), real false-positive-rate validation still outstanding.
 6. Phases 8–10: privacy/accessibility, prolonged tests, signed package and clean install/upgrade/uninstall.
 
 | Risk | Impact | Mitigation / release gate |
@@ -127,7 +127,7 @@ Health needs a documented weighting model and minimum coverage. Propose no score
 | Long retention volume | Disk growth/slow UI | Aggregates, bounded writes, retention and one-year load test |
 | Speed endpoint terms/reliability | Broken or unauthorized tests | Supported provider contract, bounded transfer, explicit action |
 | Elevated service/IPC | Security exposure | Scaffold implemented with restricted ACL, versioned/bounded schema; signing, dedicated service account and unauthorized-client tests remain |
-| New-app/brief-spike alerts | Alert fatigue | Learning, duration threshold, quality gate, trust and cooldown |
+| New-app/brief-spike alerts | Alert fatigue | Implemented: learning period, duration threshold, trust exclusion and cooldown (ADR-011); real false-positive-rate validation against live usage still outstanding |
 
 ## Essential review questions
 

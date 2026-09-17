@@ -30,7 +30,7 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
         await Execute(connection, "CREATE TABLE IF NOT EXISTS SchemaMigrations(Version INTEGER PRIMARY KEY, AppliedUtc INTEGER NOT NULL);", token);
         await using var check = connection.CreateCommand(); check.CommandText = "SELECT COALESCE(MAX(Version),0) FROM SchemaMigrations";
         var version = Convert.ToInt32(await check.ExecuteScalarAsync(token));
-        if (version > 2) throw new InvalidOperationException("Database version is newer than this application. Use a newer application build.");
+        if (version > 3) throw new InvalidOperationException("Database version is newer than this application. Use a newer application build.");
         if (version < 1)
         {
             using var transaction = connection.BeginTransaction();
@@ -59,6 +59,19 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
                     PRIMARY KEY(Pid,ProcessName,Minute));
                 CREATE INDEX IX_ApplicationTrafficMinutes_Time ON ApplicationTrafficMinutes(Minute);
                 INSERT INTO SchemaMigrations VALUES(2,unixepoch());
+                """;
+            await migration.ExecuteNonQueryAsync(token); transaction.Commit();
+        }
+        if (version < 3)
+        {
+            using var transaction = connection.BeginTransaction();
+            await using var migration = connection.CreateCommand(); migration.Transaction = transaction;
+            migration.CommandText = """
+                CREATE TABLE AnomalyEvents(Id INTEGER PRIMARY KEY, Time INTEGER NOT NULL, ProcessName TEXT NOT NULL,
+                    Direction TEXT NOT NULL, Severity TEXT NOT NULL, CurrentRate REAL NOT NULL, BaselineMean REAL NOT NULL,
+                    Deviation REAL NOT NULL, Explanation TEXT NOT NULL, Notified INTEGER NOT NULL);
+                CREATE INDEX IX_AnomalyEvents_Time ON AnomalyEvents(Time);
+                INSERT INTO SchemaMigrations VALUES(3,unixepoch());
                 """;
             await migration.ExecuteNonQueryAsync(token); transaction.Commit();
         }
@@ -165,6 +178,41 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
         while (await reader.ReadAsync(token)) rows.Add(new(reader.GetInt32(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(5)), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6))));
         return rows;
     }, token);
+    public Task<IReadOnlyList<ApplicationMinutePoint>> GetApplicationMinuteSeriesAsync(string processName, DateTimeOffset from, CancellationToken token) => WithConnection<IReadOnlyList<ApplicationMinutePoint>>(async connection =>
+    {
+        // Grouped by Minute alone (dropping Pid) so multiple concurrent processes sharing one name — e.g.
+        // several chrome.exe helpers — contribute to one learned baseline, matching "multiple processes
+        // belonging to one application" (requirements section 10.1). Bytes are summed across PIDs (combined
+        // throughput), but covered seconds uses MAX(Windows), not SUM — concurrent PIDs' 5-second windows
+        // overlap in wall-clock time, so summing them would double-count coverage and understate the rate.
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Minute,SUM(Received),SUM(Sent),MAX(Windows)*5.0 FROM ApplicationTrafficMinutes WHERE ProcessName=$name AND Minute >= $from GROUP BY Minute ORDER BY Minute";
+        command.Parameters.AddWithValue("$name", processName); command.Parameters.AddWithValue("$from", from.ToUnixTimeSeconds());
+        var rows = new List<ApplicationMinutePoint>(); await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) rows.Add(new(DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(0)), reader.GetInt64(1), reader.GetInt64(2), reader.GetDouble(3)));
+        return rows;
+    }, token);
+    public Task<long> SaveAnomalyEventAsync(AnomalyEvent anomaly, CancellationToken token) => WithConnection(async connection =>
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO AnomalyEvents(Time,ProcessName,Direction,Severity,CurrentRate,BaselineMean,Deviation,Explanation,Notified) VALUES($time,$name,$direction,$severity,$current,$mean,$deviation,$explanation,$notified); SELECT last_insert_rowid();";
+        command.Parameters.AddWithValue("$time", anomaly.Timestamp.ToUnixTimeSeconds()); command.Parameters.AddWithValue("$name", anomaly.ProcessName);
+        command.Parameters.AddWithValue("$direction", anomaly.Direction); command.Parameters.AddWithValue("$severity", anomaly.Severity);
+        command.Parameters.AddWithValue("$current", anomaly.CurrentBytesPerSecond); command.Parameters.AddWithValue("$mean", anomaly.BaselineMeanBytesPerSecond);
+        command.Parameters.AddWithValue("$deviation", anomaly.DeviationMultiple); command.Parameters.AddWithValue("$explanation", anomaly.Explanation);
+        command.Parameters.AddWithValue("$notified", anomaly.Notified ? 1 : 0);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(token));
+    }, token);
+    public Task<IReadOnlyList<AnomalyEvent>> GetAnomalyEventsAsync(int limit, CancellationToken token) => WithConnection<IReadOnlyList<AnomalyEvent>>(async connection =>
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id,Time,ProcessName,Direction,Severity,CurrentRate,BaselineMean,Deviation,Explanation,Notified FROM AnomalyEvents ORDER BY Time DESC,Id DESC LIMIT $limit";
+        command.Parameters.AddWithValue("$limit", limit);
+        var rows = new List<AnomalyEvent>(); await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) rows.Add(new(reader.GetInt64(0), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(1)), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+            reader.GetDouble(5), reader.GetDouble(6), reader.GetDouble(7), reader.GetString(8), reader.GetInt32(9) != 0));
+        return rows;
+    }, token);
     public Task SaveDiagnosticAsync(DiagnosticResult result, CancellationToken token) => WithConnection(async connection =>
     {
         await Execute(connection, "INSERT INTO Diagnostics(Time,Json) VALUES($time,$json)", token, ("$time", result.Timestamp.ToUnixTimeSeconds()), ("$json", JsonSerializer.Serialize(result))); return 0;
@@ -175,7 +223,7 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
         return WithConnection(async connection =>
         {
             int count = 0; var cutoff = DateTimeOffset.UtcNow.AddDays(-retentionDays).ToUnixTimeSeconds();
-            foreach (var (table, column) in new[] { ("TrafficMinutes", "Minute"), ("ConnectionEvents", "Time"), ("Diagnostics", "Time"), ("ApplicationTrafficMinutes", "Minute") })
+            foreach (var (table, column) in new[] { ("TrafficMinutes", "Minute"), ("ConnectionEvents", "Time"), ("Diagnostics", "Time"), ("ApplicationTrafficMinutes", "Minute"), ("AnomalyEvents", "Time") })
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = $"DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {column} < $cutoff LIMIT 2000)";
@@ -186,7 +234,7 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
     }
     public Task DeleteHistoryAsync(CancellationToken token) => WithConnection(async connection =>
     {
-        await Execute(connection, "BEGIN; DELETE FROM TrafficMinutes; DELETE FROM ConnectionEvents; DELETE FROM Diagnostics; DELETE FROM Adapters; DELETE FROM ApplicationTrafficMinutes; COMMIT; PRAGMA wal_checkpoint(TRUNCATE);", token); return 0;
+        await Execute(connection, "BEGIN; DELETE FROM TrafficMinutes; DELETE FROM ConnectionEvents; DELETE FROM Diagnostics; DELETE FROM Adapters; DELETE FROM ApplicationTrafficMinutes; DELETE FROM AnomalyEvents; COMMIT; PRAGMA wal_checkpoint(TRUNCATE);", token); return 0;
     }, token);
     public Task<string> CheckIntegrityAsync(CancellationToken token) => WithConnection(async connection =>
     {

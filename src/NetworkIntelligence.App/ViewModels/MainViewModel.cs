@@ -22,6 +22,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<string> Events { get; } = [];
     public ObservableCollection<string> Usage { get; } = [];
     public ObservableCollection<string> AppUsage { get; } = [];
+    public ObservableCollection<string> RecentAlerts { get; } = [];
     public ObservableCollection<double?> Downloads { get; } = [];
     public ObservableCollection<double?> Uploads { get; } = [];
     public ISeries[] Series { get; }
@@ -99,6 +100,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         foreach (var item in events) Events.Insert(0, $"{item.Timestamp.ToLocalTime():g}   {item.AdapterName}   {item.PreviousState} → {item.State}");
         while (Events.Count > 200) Events.RemoveAt(Events.Count - 1);
+    }
+    public void AddAlert(AnomalyEvent anomaly)
+    {
+        string arrow = anomaly.Direction == "Download" ? "↓" : "↑";
+        RecentAlerts.Insert(0, $"{anomaly.Timestamp.ToLocalTime():g}   {anomaly.Severity}   {anomaly.ProcessName}   {arrow} {FormatRate(anomaly.CurrentBytesPerSecond)}\n{anomaly.Explanation}");
+        while (RecentAlerts.Count > 50) RecentAlerts.RemoveAt(RecentAlerts.Count - 1);
     }
     public void ClearSession() { session.Clear(); Downloads.Clear(); Uploads.Clear(); NotifyMetrics(); }
     private void NotifyMetrics()

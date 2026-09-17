@@ -26,6 +26,14 @@ public sealed record HistoryPoint(DateTimeOffset Timestamp, double? DownloadByte
 /// MonitoringService snapshots (see docs/DECISIONS.md ADR-007/009).</summary>
 public sealed record ApplicationUsageSummary(int Pid, string ProcessName, long ReceivedBytes, long SentBytes,
     long Windows, DateTimeOffset First, DateTimeOffset Last);
+/// <summary>One minute-bucket data point for baseline learning, sourced from ApplicationTrafficMinutes.
+/// CoveredSeconds is Windows*5 (each MonitoringService window is exactly 5s when Measured) rather than an
+/// assumed 60, so partially-covered buckets (service just started/stopped mid-minute) don't understate rate.</summary>
+public sealed record ApplicationMinutePoint(DateTimeOffset Minute, long ReceivedBytes, long SentBytes, double CoveredSeconds);
+/// <summary>A fired, persisted anomaly (requirements section 10.5 step 15). <paramref name="Notified"/> records
+/// whether a tray notification actually happened — quiet hours suppress the notification, never the storage.</summary>
+public sealed record AnomalyEvent(long Id, DateTimeOffset Timestamp, string ProcessName, string Direction, string Severity,
+    double CurrentBytesPerSecond, double BaselineMeanBytesPerSecond, double DeviationMultiple, string Explanation, bool Notified);
 
 public sealed record AppSettings
 {
@@ -40,12 +48,20 @@ public sealed record AppSettings
     public int QuietStartHour { get; init; } = 22;
     public int QuietEndHour { get; init; } = 7;
     public bool QuietHoursEnabled { get; init; }
+    public bool AnomalyDetectionEnabled { get; init; } = true;
+    /// <summary>Standard-deviation multiple required before a deviation counts as anomalous — lower is more
+    /// sensitive. Default matches AnomalySettings.Balanced's provisional proposal (docs/ARCHITECTURE_REVIEW.md).</summary>
+    public double AnomalySensitivity { get; init; } = 3.0;
+    /// <summary>Process names excluded from anomaly evaluation entirely (requirements section 10.5 step 11).
+    /// Matched case-insensitively against MonitoringService's resolved process name.</summary>
+    public string[] TrustedApplications { get; init; } = [];
     public void Validate()
     {
         if (RetentionDays is < 1 or > 3650) throw new ArgumentException("Retention must be between 1 and 3650 days.");
         if (Theme is not ("System" or "Light" or "Dark")) throw new ArgumentException("Choose System, Light or Dark theme.");
         if (QuietStartHour is < 0 or > 23 || QuietEndHour is < 0 or > 23) throw new ArgumentException("Quiet hours must be 0–23.");
         if (Uri.CheckHostName(DiagnosticTarget) == UriHostNameType.Unknown) throw new ArgumentException("Enter a host name or IP address, without a URL or port.");
+        if (AnomalySensitivity is < 1.5 or > 6.0) throw new ArgumentException("Anomaly sensitivity must be between 1.5 and 6.0 standard deviations.");
     }
 }
 public interface INetworkCollector
@@ -70,6 +86,11 @@ public interface IHistoryStore
     /// unavailable/error window as if it were zero traffic.</summary>
     Task SaveApplicationTrafficAsync(ServiceSnapshot snapshot, CancellationToken token);
     Task<IReadOnlyList<ApplicationUsageSummary>> GetApplicationUsageAsync(DateTimeOffset from, CancellationToken token);
+    /// <summary>Minute-bucket time series for one process name, bounded to <paramref name="from"/>..now — the
+    /// input to baseline learning (NetworkIntelligence.Domain.BaselineCalculator).</summary>
+    Task<IReadOnlyList<ApplicationMinutePoint>> GetApplicationMinuteSeriesAsync(string processName, DateTimeOffset from, CancellationToken token);
+    Task<long> SaveAnomalyEventAsync(AnomalyEvent anomaly, CancellationToken token);
+    Task<IReadOnlyList<AnomalyEvent>> GetAnomalyEventsAsync(int limit, CancellationToken token);
 }
 /// <summary>Talks to the optional, elevated MonitoringService (docs/DECISIONS.md ADR-007) over its named pipe.
 /// Never throws: any failure to reach the service — not installed, not running, access denied — is reported as

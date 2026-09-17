@@ -15,7 +15,7 @@ Sample each adapter independently using monotonic elapsed time. First sample, id
 
 ## Automated tests by layer
 
-- Domain: rates/reset/identity/gaps, units, aggregation, quality propagation, baselines, learning period, directional anomalies, brief/sustained spikes, cooldown, quiet hours, trust and health coverage.
+- Domain: rates/reset/identity/gaps, units, aggregation, quality propagation, baselines, learning period, directional anomalies, brief/sustained spikes, cooldown, quiet hours, trust and health coverage. **Baselines/learning period/directional anomalies/brief-and-sustained-spikes/cooldown/quiet-hours/trust done — see docs/DECISIONS.md ADR-011** (29 new unit tests, 61 total). Health coverage remains unimplemented (network health score, spec 12.4, is a separate unbuilt feature).
 - Infrastructure: native buffer resizing/errors, collector cancellation, actual adapter discovery; SQLite migrations/rollback/integrity/disk-full/retention; export escaping and missing values; bounded provider success/failure/cancel.
 - Application: bounded queues, slow storage, shutdown, pause/resume, service disconnect/recovery and unauthorized IPC.
 - UI: navigation, keyboard/screen reader, dark/light/high contrast, chart unavailable states, tray lifecycle and notification activation.

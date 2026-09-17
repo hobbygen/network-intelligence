@@ -15,6 +15,7 @@ public sealed partial class MainWindow : Window
     private readonly IHistoryStore store;
     private readonly Diagnostics diagnostics;
     private readonly TransferTest transfer;
+    private readonly AnomalyDetectionService anomalyDetection;
     private TrayIcon? tray;
     private bool loaded, quitting, closeNotified;
     private CancellationTokenSource? diagnosticCancellation;
@@ -26,9 +27,9 @@ public sealed partial class MainWindow : Window
     private string currentPage = "Dashboard";
     private MonitoringSnapshot? pendingSnapshot;
     private int snapshotQueued;
-    public MainWindow(MonitoringService monitoring, IHistoryStore store, Diagnostics diagnostics, TransferTest transfer)
+    public MainWindow(MonitoringService monitoring, IHistoryStore store, Diagnostics diagnostics, TransferTest transfer, AnomalyDetectionService anomalyDetection)
     {
-        this.monitoring = monitoring; this.store = store; this.diagnostics = diagnostics; this.transfer = transfer;
+        this.monitoring = monitoring; this.store = store; this.diagnostics = diagnostics; this.transfer = transfer; this.anomalyDetection = anomalyDetection;
         InitializeComponent();
         Root.DataContext = ViewModel;
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1280, 920));
@@ -54,7 +55,12 @@ public sealed partial class MainWindow : Window
         };
         monitoring.Status += message => DispatcherQueue.TryEnqueue(() => ViewModel.Status = message);
         monitoring.ConnectionsChanged += events => DispatcherQueue.TryEnqueue(() => ConnectionChanges(events));
-        monitoring.ApplicationTraffic += snapshot => DispatcherQueue.TryEnqueue(() => ViewModel.ApplyApplicationTraffic(snapshot));
+        monitoring.ApplicationTraffic += snapshot =>
+        {
+            DispatcherQueue.TryEnqueue(() => ViewModel.ApplyApplicationTraffic(snapshot));
+            _ = anomalyDetection.IngestAsync(snapshot, CancellationToken.None);
+        };
+        anomalyDetection.Anomaly += anomaly => DispatcherQueue.TryEnqueue(() => AnomalyDetected(anomaly));
     }
     private async void WindowLoaded(object sender, RoutedEventArgs e)
     {
@@ -66,8 +72,9 @@ public sealed partial class MainWindow : Window
         {
             await Task.Run(() => store.InitializeAsync(CancellationToken.None));
             var settings = await Task.Run(() => store.LoadSettingsAsync(CancellationToken.None));
-            monitoring.UpdateSettings(settings); ApplySettings(settings);
+            monitoring.UpdateSettings(settings); anomalyDetection.UpdateSettings(settings); ApplySettings(settings);
             await LoadHistoryAsync();
+            foreach (var alert in (await Task.Run(() => store.GetAnomalyEventsAsync(50, CancellationToken.None))).Reverse()) ViewModel.AddAlert(alert);
             ViewModel.Status = "Monitoring locally · no cloud account required";
         }
         catch (Exception ex) { ViewModel.Status = "Local history unavailable: " + ex.Message; }
@@ -109,6 +116,21 @@ public sealed partial class MainWindow : Window
         AlertsEnabled.IsOn = settings.AlertsEnabled; QuietEnabled.IsOn = settings.QuietHoursEnabled;
         QuietStart.Value = settings.QuietStartHour; QuietEnd.Value = settings.QuietEndHour;
         DiagnosticTarget.Text = settings.DiagnosticTarget;
+        AnomalyEnabled.IsOn = settings.AnomalyDetectionEnabled; AnomalySensitivity.Value = settings.AnomalySensitivity;
+        TrustedApplicationsText.Text = settings.TrustedApplications.Length == 0 ? "None yet — use \"Trust this app\" on the Application usage page." : string.Join(", ", settings.TrustedApplications);
+    }
+    private async void TrustApplication(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: AppTrafficDisplay app }) return;
+        if (monitoring.Settings.TrustedApplications.Contains(app.Name, StringComparer.OrdinalIgnoreCase)) { ViewModel.Status = $"{app.Name} is already trusted."; return; }
+        try
+        {
+            var settings = monitoring.Settings with { TrustedApplications = [.. monitoring.Settings.TrustedApplications, app.Name] };
+            settings.Validate(); await Task.Run(() => store.SaveSettingsAsync(settings, CancellationToken.None));
+            monitoring.UpdateSettings(settings); anomalyDetection.UpdateSettings(settings); ApplySettings(settings);
+            ViewModel.Status = $"{app.Name} marked trusted — excluded from anomaly detection.";
+        }
+        catch (Exception ex) { ViewModel.Status = "Could not save trust setting: " + ex.Message; }
     }
     private void NavigationChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
@@ -170,7 +192,7 @@ public sealed partial class MainWindow : Window
     {
         ViewModel.AddEvents(events);
         var settings = monitoring.Settings;
-        if (!settings.AlertsEnabled || IsQuiet(settings, DateTime.Now.Hour)) return;
+        if (!settings.AlertsEnabled || QuietHours.IsQuiet(settings, DateTime.Now.Hour)) return;
         foreach (var item in events.Where(e => e.PreviousState == "Up" && e.State != "Up"))
         {
             if (lastAlert.TryGetValue(item.AdapterId, out var last) && item.Timestamp - last < TimeSpan.FromMinutes(5)) continue;
@@ -178,8 +200,11 @@ public sealed partial class MainWindow : Window
             tray?.Notify("Network adapter disconnected", $"{item.AdapterName}: {item.PreviousState} → {item.State}. This does not necessarily mean internet connectivity was lost.");
         }
     }
-    internal static bool IsQuiet(AppSettings settings, int hour) => settings.QuietHoursEnabled && (settings.QuietStartHour == settings.QuietEndHour
-        || (settings.QuietStartHour < settings.QuietEndHour ? hour >= settings.QuietStartHour && hour < settings.QuietEndHour : hour >= settings.QuietStartHour || hour < settings.QuietEndHour));
+    private void AnomalyDetected(AnomalyEvent anomaly)
+    {
+        ViewModel.AddAlert(anomaly);
+        if (anomaly.Notified) tray?.Notify("Unusual network activity detected", $"{anomaly.ProcessName}: {anomaly.Explanation}");
+    }
     private async void DiagnosticsClicked(object sender, RoutedEventArgs e)
     {
         if (diagnosticCancellation is not null) return;
@@ -272,9 +297,10 @@ public sealed partial class MainWindow : Window
         {
             var settings = monitoring.Settings with { RetentionDays = checked((int)Retention.Value), Theme = ThemePicker.SelectedIndex == 2 ? "Dark" : ThemePicker.SelectedIndex == 1 ? "Light" : "System", CloseToTray = CloseToTray.IsOn,
                 CollectAddresses = CollectAddresses.IsOn, CollectSsid = CollectSsid.IsOn, CollectProcessNames = CollectNames.IsOn, AlertsEnabled = AlertsEnabled.IsOn,
-                QuietHoursEnabled = QuietEnabled.IsOn, QuietStartHour = checked((int)QuietStart.Value), QuietEndHour = checked((int)QuietEnd.Value), DiagnosticTarget = DiagnosticTarget.Text.Trim() };
+                QuietHoursEnabled = QuietEnabled.IsOn, QuietStartHour = checked((int)QuietStart.Value), QuietEndHour = checked((int)QuietEnd.Value), DiagnosticTarget = DiagnosticTarget.Text.Trim(),
+                AnomalyDetectionEnabled = AnomalyEnabled.IsOn, AnomalySensitivity = AnomalySensitivity.Value };
             settings.Validate(); await Task.Run(() => store.SaveSettingsAsync(settings, CancellationToken.None));
-            monitoring.UpdateSettings(settings); ApplySettings(settings);
+            monitoring.UpdateSettings(settings); anomalyDetection.UpdateSettings(settings); ApplySettings(settings);
             ViewModel.Status = "Settings saved. Privacy changes apply on the next collection cycle.";
         }
         catch (Exception ex) { ViewModel.Status = "Settings not saved: " + ex.Message; }
