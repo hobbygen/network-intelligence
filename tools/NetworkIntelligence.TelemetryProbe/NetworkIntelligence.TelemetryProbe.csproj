@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NetworkIntelligence.Domain\NetworkIntelligence.Domain.csproj" />
+    <ProjectReference Include="..\..\src\NetworkIntelligence.Contracts\NetworkIntelligence.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

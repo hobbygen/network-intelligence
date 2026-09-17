@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Validate the ETW kernel Network provider as the Tier-3 per-application telemetry mechanism: standard-user permission-denied path and an elevated capture (0 events lost, real per-process TCP/UDP byte totals, IPv4/IPv6, header-only) — see `docs/ETW_VALIDATION.md`. Not yet wired into the app; controlled accuracy comparison and the elevated service remain outstanding.
+- Validate the ETW kernel Network provider as the Tier-3 per-application telemetry mechanism: standard-user permission-denied path and an elevated capture (0 events lost, real per-process TCP/UDP byte totals, IPv4/IPv6, header-only) — see `docs/ETW_VALIDATION.md`.
+- Add the `NetworkIntelligence.MonitoringService` scaffold: a Generic Host worker (runnable as a plain elevated console process or installed as a Windows Service, `StartupType Manual`) hosting a continuous kernel-ETW collector and a named-pipe IPC server with a restrictive ACL, versioned/bounded message framing, and audit-logged client identity. Validated end to end manually. Add install/uninstall/local-run scripts and 6 wire-format unit tests. Not yet wired into the app; controlled accuracy comparison, code signing and a dedicated service account remain outstanding.
 
 ## 0.2.0 early access — 2026-09-17
 

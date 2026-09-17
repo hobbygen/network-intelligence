@@ -38,8 +38,24 @@ Native WinUI Debug build passed with zero warnings/errors. The full solution Rel
 
 Standard-user run: `TraceEventSession.IsElevated()` false, no session attempted, `PermissionDenied` reported. Elevated run (one interactive UAC consent, kernel Network provider via `Microsoft.Diagnostics.Tracing.TraceEvent`, 30.25s window, ~24 MB concurrent HTTPS background traffic): 0 events lost; 159 TCP send / 382 TCP receive / 35 UDP send / 282 UDP receive events; 433 IPv6-flagged events; 15 processes attributed with real per-PID received/sent byte totals; only event headers read, no payload. This validates the Tier-3 mechanism and the elevation requirement; it is not yet an accuracy-certified feature — see remaining acceptance work below.
 
+## MonitoringService scaffold end-to-end validation (2026-09-17, see `docs/DECISIONS.md` ADR-007)
+
+Manual test: `scripts/service-run-foreground.ps1`-equivalent elevated run of `NetworkIntelligence.MonitoringService.exe` (one interactive UAC consent), then `tools/NetworkIntelligence.TelemetryProbe --service-status` run as the ordinary standard user in a separate, unelevated shell.
+
+| Check | Result |
+|---|---|
+| Service starts, enables kernel provider | Succeeded; logged "Kernel Network ETW session started." |
+| Standard-user client connects through the pipe ACL | Succeeded (Administrators + `InteractiveSid` allowed; `AnonymousSid`/`NetworkSid` denied) |
+| Hello/HelloAck handshake | Succeeded, protocol version 1 |
+| SnapshotRequest → live per-process data | Succeeded across two consecutive 5-second windows, 0 events lost both times |
+| Client identity audit logging | Initially broken (`GetImpersonationUserName()` needs a prior read — fixed same session); confirmed working, logged real identity `hp` |
+| Live-traffic attribution | Curl-generated downloads (~2 MB each) visible by PID within the window; PID had already exited by snapshot time in one run, correctly labeled "(exited)" — a live instance of the documented PID-reuse caveat |
+| Wire-format unit tests (no elevation needed) | 6 new tests added (`ServiceProtocolTests.cs`): round-trip, truncated-stream, oversized-declared-length, empty-disconnect, unavailable-snapshot — all passing |
+
+This validates the IPC and continuous-collection design end to end. It is not an accuracy or security certification — see remaining acceptance work below.
+
 ## Remaining acceptance work
 
-Controlled known-byte-traffic comparison for ETW accounting; IPv6/UDP endpoint semantics; adapter disambiguation for per-process events; process-restart attribution; ETW session CPU/memory overhead benchmark; Wi-Fi SSID/signal/channel/security; internet/gateway reachability; adapter switching/sleep; elevated MonitoringService and secure IPC (not yet built); Windows 10 and clean Windows 11 installs; storage/migrations/retention; speed provider integration; UI behavior/accessibility; anomaly detection; long-duration/high-throughput benchmarks; signed release packaging.
+Controlled known-byte-traffic comparison for ETW accounting; IPv6/UDP endpoint semantics; adapter disambiguation for per-process events; process-restart attribution; ETW session CPU/memory overhead benchmark; Wi-Fi SSID/signal/channel/security; internet/gateway reachability; adapter switching/sleep; MonitoringService code signing, dedicated least-privileged service account, automated unauthorized-client access tests, and a real client wired into the main App/Infrastructure; Windows 10 and clean Windows 11 installs; storage/migrations/retention; speed provider integration; UI behavior/accessibility; anomaly detection; long-duration/high-throughput benchmarks; signed release packaging.
 
-The Application Usage feature is not implemented in the app; the ETW mechanism has only been validated in the standalone probe tool. Phase 0/1 are not fully complete and no production-readiness claim is made.
+The Application Usage feature is not implemented in the app; the ETW mechanism and the elevated service that serves it have only been validated manually and standalone, never wired into the WinUI App. Phase 0/1 are not fully complete and no production-readiness claim is made.

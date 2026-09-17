@@ -42,6 +42,22 @@ dotnet run --no-build --project tools/NetworkIntelligence.TelemetryProbe -- --sa
 dotnet run --no-build --project tools/NetworkIntelligence.TelemetryProbe -- --samples 3 --target localhost
 ```
 
+## Optional elevated monitoring service (scaffold, not part of the app yet)
+
+`NetworkIntelligence.MonitoringService` is an optional, explicitly installed collector for per-application byte accounting. It never runs by default, and the main app works fully without it. It is a scaffold — validated manually end to end, not yet wired into the App, not signed, not accuracy-certified (see `docs/ETW_VALIDATION.md`).
+
+```powershell
+# Local test run (no install), elevated shell required — stop with Ctrl+C:
+powershell -NoProfile -File scripts/service-run-foreground.ps1
+
+# From an ordinary, unelevated shell while the above is running:
+dotnet run --no-build --project tools/NetworkIntelligence.TelemetryProbe -- --service-status
+
+# Install/uninstall as a Windows Service (Manual start; does not start automatically), elevated:
+powershell -NoProfile -File scripts/service-install.ps1
+powershell -NoProfile -File scripts/service-uninstall.ps1
+```
+
 ## Documentation
 
 - [User and installation guide](docs/USER_GUIDE.md)
@@ -56,4 +72,4 @@ dotnet run --no-build --project tools/NetworkIntelligence.TelemetryProbe -- --sa
 
 The original requirements remain unchanged in `NETWORK_INTELLIGENCE.md`. Per-application bandwidth, baselines/anomalies, health scoring, signed installation and complete Windows 10 validation are still outstanding. Missing telemetry is displayed as unavailable.
 
-The elevated kernel-ETW mechanism for per-application byte accounting is now validated in a standalone probe (`docs/ETW_VALIDATION.md`) — not yet part of the app. Standard users get `PermissionDenied`; an elevated run captured real per-process TCP/UDP byte totals with zero event loss. A controlled known-traffic accuracy comparison and the actual optional elevated `MonitoringService` (with secure IPC) are still required before this becomes a product feature.
+The elevated kernel-ETW mechanism for per-application byte accounting is validated (`docs/ETW_VALIDATION.md`) and now has a working `MonitoringService` scaffold with secure named-pipe IPC (`docs/DECISIONS.md` ADR-007) — not yet part of the app. A controlled known-traffic accuracy comparison, code signing, a dedicated service account, and wiring an actual client into the App are still required before this becomes a product feature.

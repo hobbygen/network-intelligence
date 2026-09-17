@@ -26,7 +26,7 @@ NetworkIntelligence.App (initial WinUI window implemented; navigation/viewmodels
       -> Contracts (planned versioned collector/store/notification interfaces)
   -> Infrastructure (planned Windows collectors, SQLite, settings, export)
       -> Domain + Contracts
-MonitoringService (optional, pending evidence; references Contracts)
+MonitoringService (optional, scaffold implemented; Generic Host worker, references Contracts)
 tools/TelemetryProbe (implemented experiment; references Domain)
 tests/Domain.Tests (implemented rate regressions)
 ```
@@ -66,7 +66,7 @@ ETW is the validated Tier 3 mechanism (elevated), confirmed by a standard-user a
 
 Answers to the ten required questions, now measured rather than provisional: (1) traffic attributed to individual processes — yes, elevated only; (2) per-direction bytes — yes, measured per event; (3) restarts — process-instance identity by PID+creation time proposed, not yet tested; (4) adapters distinguished for aggregate counters, per-process interface mapping still pending; (5) collection reads size/PID/protocol/direction/family only, confirmed no payload access; (6) elevation (Administrator or Performance Log Users) confirmed required — standard user is refused before any session attempt; (7) UDP/IPv6 endpoint semantics beyond size, loopback, VPN, retransmits remain unresolved; (8) only whole-probe wall time measured (0 events lost in a 30s run), no isolated session CPU/memory benchmark yet; (9) current host (Windows 11 build 26200) only, Windows 10 validation pending; (10) controlled known-byte traffic comparison not yet completed.
 
-ETW requires elevation, confirmed. The mechanism must ship inside an explicitly installed optional service with authenticated local IPC, user/SID ACL, versioned bounded messages and no arbitrary commands. The UI remains unelevated and usable without service. Service install, signing, failure recovery and unauthorized-client tests precede release. No service or driver has been installed by this work; the probe opens and disposes its own session per run.
+ETW requires elevation, confirmed, and the mechanism now ships inside `NetworkIntelligence.MonitoringService` — a scaffold, not a released feature (see ADR-007, `docs/DECISIONS.md`). It is an explicitly installed, optional Generic Host worker with an authenticated local named pipe (`WellKnownSidType.InteractiveSid`/Administrators ACL, anonymous/network denied), versioned bounded messages (fixed `ServiceMessageType` enum, length-capped framing) and no arbitrary commands. The main App remains unelevated and fully usable without the service. Manually validated end to end: elevated service, unelevated client, real per-process data, zero events lost. Still required before release: code signing, a dedicated least-privileged service account, automated unauthorized-client tests, and wiring an actual client into the main App/Infrastructure (today the only client is the telemetry probe's `--service-status` flag).
 
 ## Database design (proposal, not an implemented migration)
 
@@ -126,7 +126,7 @@ Health needs a documented weighting model and minimum coverage. Propose no score
 | Virtual adapters and counter resets | Double-count/huge spikes | Adapter scope, monotonic timing, reset gaps, regression tests |
 | Long retention volume | Disk growth/slow UI | Aggregates, bounded writes, retention and one-year load test |
 | Speed endpoint terms/reliability | Broken or unauthorized tests | Supported provider contract, bounded transfer, explicit action |
-| Elevated service/IPC | Security exposure | Optional service, restricted ACL, schema validation, signing/tests |
+| Elevated service/IPC | Security exposure | Scaffold implemented with restricted ACL, versioned/bounded schema; signing, dedicated service account and unauthorized-client tests remain |
 | New-app/brief-spike alerts | Alert fatigue | Learning, duration threshold, quality gate, trust and cooldown |
 
 ## Essential review questions

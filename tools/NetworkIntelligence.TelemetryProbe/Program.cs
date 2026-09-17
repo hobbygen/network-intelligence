@@ -8,7 +8,13 @@ using NetworkIntelligence.Domain;
 if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("Windows required."); return 1; }
 if (args.Contains("--help"))
 {
-    Console.WriteLine("--samples 2..60 (default 5) --target hostname-or-IP (optional) --etw-seconds 1..60 (optional)\nPassive by default. --target resolves DNS and sends five ICMP probes. --etw-seconds attempts a kernel network ETW session.\nJSON lines to stdout. No IP addresses, MACs, SSIDs, executable paths or payloads are saved.");
+    Console.WriteLine("--samples 2..60 (default 5) --target hostname-or-IP (optional) --etw-seconds 1..60 (optional) --service-status (optional)\nPassive by default. --target resolves DNS and sends five ICMP probes. --etw-seconds attempts a kernel network ETW session.\n--service-status connects to the optional MonitoringService pipe and exits; it does not run the adapter probe.\nJSON lines to stdout. No IP addresses, MACs, SSIDs, executable paths or payloads are saved.");
+    return 0;
+}
+if (args.Contains("--service-status"))
+{
+    var jsonOptions = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
+    Console.WriteLine(JsonSerializer.Serialize(await ServiceStatusProbe.RunAsync(5), jsonOptions));
     return 0;
 }
 int samples = 5;

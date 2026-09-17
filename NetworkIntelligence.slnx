@@ -5,6 +5,7 @@
     <Project Path="src/NetworkIntelligence.Contracts/NetworkIntelligence.Contracts.csproj" />
     <Project Path="src/NetworkIntelligence.Domain/NetworkIntelligence.Domain.csproj" />
     <Project Path="src/NetworkIntelligence.Infrastructure/NetworkIntelligence.Infrastructure.csproj" />
+    <Project Path="src/NetworkIntelligence.MonitoringService/NetworkIntelligence.MonitoringService.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetworkIntelligence.Domain.Tests/NetworkIntelligence.Domain.Tests.csproj" />

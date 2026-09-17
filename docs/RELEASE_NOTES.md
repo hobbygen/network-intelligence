@@ -4,7 +4,7 @@ Adds the working WinUI monitoring shell, real adapter telemetry and charts, nati
 
 This is an unsigned engineering build, not the complete 1.0 product. Important remaining requirements:
 
-- Per-application byte accounting: the elevated kernel-ETW mechanism is now validated in a standalone probe (see `docs/ETW_VALIDATION.md`) — 0 events lost, real per-process byte totals, IPv4/IPv6, header-only. Still missing: controlled known-traffic accuracy comparison, the optional elevated collector/service itself, and secure IPC.
+- Per-application byte accounting: the elevated kernel-ETW mechanism is validated (`docs/ETW_VALIDATION.md`) and now has a working `NetworkIntelligence.MonitoringService` scaffold (`docs/DECISIONS.md` ADR-007) — a Generic Host worker with a versioned, ACL-restricted named-pipe IPC, validated end to end (elevated service, unelevated client, real per-process data, zero events lost). Still missing: controlled known-traffic accuracy comparison, code signing, a dedicated service account, and wiring an actual client into the main App — the service today is only reachable from the telemetry probe's `--service-status` flag, not from the WinUI app.
 - Learned application baselines, anomaly detection, trust controls, alert action/history workflows and transparent health scoring.
 - Full Wi-Fi channel/frequency/BSSID, driver/duplex metadata and continuously sampled latency charts.
 - Persisted speed-test history, multi-provider validation and public-endpoint integration testing.
