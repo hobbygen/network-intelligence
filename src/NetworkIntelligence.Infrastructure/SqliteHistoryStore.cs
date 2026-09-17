@@ -1,0 +1,151 @@
+using System.Text.Json;
+using Microsoft.Data.Sqlite;
+using NetworkIntelligence.Contracts;
+namespace NetworkIntelligence.Infrastructure;
+
+public sealed class SqliteHistoryStore(string path) : IHistoryStore
+{
+    private readonly string connectionString = new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadWriteCreate, DefaultTimeout = 5 }.ToString();
+    private readonly SemaphoreSlim gate = new(1, 1);
+    private async Task<T> WithConnection<T>(Func<SqliteConnection, Task<T>> action, CancellationToken token)
+    {
+        await gate.WaitAsync(token);
+        try
+        {
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync(token);
+            return await action(connection);
+        }
+        finally { gate.Release(); }
+    }
+    private static async Task Execute(SqliteConnection connection, string sql, CancellationToken token, params (string Key, object? Value)[] parameters)
+    {
+        await using var command = connection.CreateCommand(); command.CommandText = sql;
+        foreach (var (key, value) in parameters) command.Parameters.AddWithValue(key, value ?? DBNull.Value);
+        await command.ExecuteNonQueryAsync(token);
+    }
+    public Task InitializeAsync(CancellationToken token) => WithConnection(async connection =>
+    {
+        await Execute(connection, "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;", token);
+        await Execute(connection, "CREATE TABLE IF NOT EXISTS SchemaMigrations(Version INTEGER PRIMARY KEY, AppliedUtc INTEGER NOT NULL);", token);
+        await using var check = connection.CreateCommand(); check.CommandText = "SELECT COALESCE(MAX(Version),0) FROM SchemaMigrations";
+        var version = Convert.ToInt32(await check.ExecuteScalarAsync(token));
+        if (version > 1) throw new InvalidOperationException("Database version is newer than this application. Use a newer application build.");
+        if (version == 0)
+        {
+            using var transaction = connection.BeginTransaction();
+            await using var migration = connection.CreateCommand(); migration.Transaction = transaction;
+            migration.CommandText = """
+                CREATE TABLE Settings(Key TEXT PRIMARY KEY, Json TEXT NOT NULL);
+                CREATE TABLE Adapters(Id TEXT PRIMARY KEY, Name TEXT NOT NULL, Type TEXT NOT NULL, LastSeen INTEGER NOT NULL);
+                CREATE TABLE TrafficMinutes(AdapterId TEXT NOT NULL, Minute INTEGER NOT NULL, Download INTEGER NOT NULL, Upload INTEGER NOT NULL,
+                    CoveredSeconds REAL NOT NULL, Samples INTEGER NOT NULL, PRIMARY KEY(AdapterId,Minute));
+                CREATE INDEX IX_TrafficMinutes_Time ON TrafficMinutes(Minute);
+                CREATE TABLE ConnectionEvents(Id INTEGER PRIMARY KEY, Time INTEGER NOT NULL, AdapterId TEXT NOT NULL, AdapterName TEXT NOT NULL, Previous TEXT NOT NULL, State TEXT NOT NULL);
+                CREATE INDEX IX_ConnectionEvents_Time ON ConnectionEvents(Time);
+                CREATE TABLE Diagnostics(Id INTEGER PRIMARY KEY, Time INTEGER NOT NULL, Json TEXT NOT NULL);
+                CREATE INDEX IX_Diagnostics_Time ON Diagnostics(Time);
+                INSERT INTO SchemaMigrations VALUES(1,unixepoch());
+                """;
+            await migration.ExecuteNonQueryAsync(token); transaction.Commit();
+        }
+        return 0;
+    }, token);
+    public Task<AppSettings> LoadSettingsAsync(CancellationToken token) => WithConnection(async connection =>
+    {
+        await using var command = connection.CreateCommand(); command.CommandText = "SELECT Json FROM Settings WHERE Key='app'";
+        var json = await command.ExecuteScalarAsync(token) as string;
+        var settings = json is null ? new AppSettings() : JsonSerializer.Deserialize<AppSettings>(json) ?? new();
+        settings.Validate(); return settings;
+    }, token);
+    public Task SaveSettingsAsync(AppSettings settings, CancellationToken token)
+    {
+        settings.Validate();
+        return WithConnection(async connection => { await Execute(connection, "INSERT INTO Settings VALUES('app',$json) ON CONFLICT(Key) DO UPDATE SET Json=excluded.Json", token, ("$json", JsonSerializer.Serialize(settings))); return 0; }, token);
+    }
+    public Task SaveAsync(MonitoringSnapshot snapshot, IReadOnlyList<ConnectionEvent> events, CancellationToken token) => WithConnection(async connection =>
+    {
+        using var transaction = connection.BeginTransaction();
+        foreach (var adapter in snapshot.Adapters)
+        {
+            await using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO Adapters VALUES($id,$name,$type,$time) ON CONFLICT(Id) DO UPDATE SET Name=excluded.Name, Type=excluded.Type, LastSeen=excluded.LastSeen";
+            command.Parameters.AddWithValue("$id", adapter.Id); command.Parameters.AddWithValue("$name", adapter.Name);
+            command.Parameters.AddWithValue("$type", adapter.Type); command.Parameters.AddWithValue("$time", snapshot.Timestamp.ToUnixTimeSeconds());
+            await command.ExecuteNonQueryAsync(token);
+            // Store only complete measured intervals. Gaps remain absent; never substitute zero.
+            if (adapter.State != "Up" || adapter.DownloadDelta is not { } down || adapter.UploadDelta is not { } up || adapter.IntervalSeconds is <= 0 or > 10) continue;
+            command.Parameters.Clear();
+            command.CommandText = """
+                INSERT INTO TrafficMinutes VALUES($id,$minute,$down,$up,$seconds,1)
+                ON CONFLICT(AdapterId,Minute) DO UPDATE SET Download=Download+excluded.Download,Upload=Upload+excluded.Upload,
+                CoveredSeconds=CoveredSeconds+excluded.CoveredSeconds,Samples=Samples+1
+                """;
+            command.Parameters.AddWithValue("$id", adapter.Id); command.Parameters.AddWithValue("$minute", snapshot.Timestamp.ToUnixTimeSeconds() / 60 * 60);
+            command.Parameters.AddWithValue("$down", down); command.Parameters.AddWithValue("$up", up); command.Parameters.AddWithValue("$seconds", adapter.IntervalSeconds);
+            await command.ExecuteNonQueryAsync(token);
+        }
+        foreach (var item in events)
+        {
+            await using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO ConnectionEvents(Time,AdapterId,AdapterName,Previous,State) VALUES($time,$id,$name,$previous,$state)";
+            command.Parameters.AddWithValue("$time", item.Timestamp.ToUnixTimeSeconds()); command.Parameters.AddWithValue("$id", item.AdapterId);
+            command.Parameters.AddWithValue("$name", item.AdapterName); command.Parameters.AddWithValue("$previous", item.PreviousState); command.Parameters.AddWithValue("$state", item.State);
+            await command.ExecuteNonQueryAsync(token);
+        }
+        transaction.Commit(); return 0;
+    }, token);
+    public Task<IReadOnlyList<UsageSummary>> GetUsageAsync(DateTimeOffset from, CancellationToken token) => WithConnection<IReadOnlyList<UsageSummary>>(async connection =>
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT t.AdapterId,a.Name,SUM(Download),SUM(Upload),SUM(Samples),SUM(CoveredSeconds),MIN(Minute),MAX(Minute) FROM TrafficMinutes t JOIN Adapters a ON a.Id=t.AdapterId WHERE Minute >= $from GROUP BY t.AdapterId ORDER BY SUM(Download)+SUM(Upload) DESC";
+        command.Parameters.AddWithValue("$from", from.ToUnixTimeSeconds());
+        var rows = new List<UsageSummary>(); await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) rows.Add(new(reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4), reader.GetDouble(5), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6)), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7))));
+        return rows;
+    }, token);
+    public Task<IReadOnlyList<HistoryPoint>> GetHistoryAsync(string adapterId, DateTimeOffset from, CancellationToken token) => WithConnection<IReadOnlyList<HistoryPoint>>(async connection =>
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Minute,Download/CoveredSeconds,Upload/CoveredSeconds FROM TrafficMinutes WHERE AdapterId=$id AND Minute >= $from ORDER BY Minute DESC LIMIT 720";
+        command.Parameters.AddWithValue("$id", adapterId); command.Parameters.AddWithValue("$from", from.ToUnixTimeSeconds());
+        var rows = new List<HistoryPoint>(); await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) rows.Add(new(DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(0)), reader.IsDBNull(1) ? null : reader.GetDouble(1), reader.IsDBNull(2) ? null : reader.GetDouble(2)));
+        rows.Reverse(); return rows;
+    }, token);
+    public Task<IReadOnlyList<ConnectionEvent>> GetEventsAsync(CancellationToken token) => WithConnection<IReadOnlyList<ConnectionEvent>>(async connection =>
+    {
+        await using var command = connection.CreateCommand(); command.CommandText = "SELECT Time,AdapterId,AdapterName,Previous,State FROM ConnectionEvents ORDER BY Time DESC,Id DESC LIMIT 200";
+        var rows = new List<ConnectionEvent>(); await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) rows.Add(new(DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(0)), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4)));
+        return rows;
+    }, token);
+    public Task SaveDiagnosticAsync(DiagnosticResult result, CancellationToken token) => WithConnection(async connection =>
+    {
+        await Execute(connection, "INSERT INTO Diagnostics(Time,Json) VALUES($time,$json)", token, ("$time", result.Timestamp.ToUnixTimeSeconds()), ("$json", JsonSerializer.Serialize(result))); return 0;
+    }, token);
+    public Task<int> CleanupAsync(int retentionDays, CancellationToken token)
+    {
+        if (retentionDays is < 1 or > 3650) throw new ArgumentOutOfRangeException(nameof(retentionDays));
+        return WithConnection(async connection =>
+        {
+            int count = 0; var cutoff = DateTimeOffset.UtcNow.AddDays(-retentionDays).ToUnixTimeSeconds();
+            foreach (var (table, column) in new[] { ("TrafficMinutes", "Minute"), ("ConnectionEvents", "Time"), ("Diagnostics", "Time") })
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = $"DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {column} < $cutoff LIMIT 2000)";
+                command.Parameters.AddWithValue("$cutoff", cutoff); count += await command.ExecuteNonQueryAsync(token);
+            }
+            return count;
+        }, token);
+    }
+    public Task DeleteHistoryAsync(CancellationToken token) => WithConnection(async connection =>
+    {
+        await Execute(connection, "BEGIN; DELETE FROM TrafficMinutes; DELETE FROM ConnectionEvents; DELETE FROM Diagnostics; DELETE FROM Adapters; COMMIT; PRAGMA wal_checkpoint(TRUNCATE);", token); return 0;
+    }, token);
+    public Task<string> CheckIntegrityAsync(CancellationToken token) => WithConnection(async connection =>
+    {
+        await using var command = connection.CreateCommand(); command.CommandText = "PRAGMA quick_check";
+        return (string?)await command.ExecuteScalarAsync(token) ?? "Unavailable";
+    }, token);
+}

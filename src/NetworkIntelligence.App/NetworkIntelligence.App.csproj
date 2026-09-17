@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.2.0</Version>
+    <Description>Local Windows network monitoring — early access</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260804001" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4654" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.12" />
+    <PackageReference Include="LiveChartsCore.SkiaSharpView.WinUI" Version="2.0.5" />
+    <ProjectReference Include="../NetworkIntelligence.Application/NetworkIntelligence.Application.csproj" />
+    <ProjectReference Include="../NetworkIntelligence.Infrastructure/NetworkIntelligence.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

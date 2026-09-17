@@ -1,0 +1,111 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using LiveChartsCore;
+using LiveChartsCore.SkiaSharpView;
+using LiveChartsCore.SkiaSharpView.Painting;
+using NetworkIntelligence.Contracts;
+using SkiaSharp;
+namespace NetworkIntelligence.App.ViewModels;
+
+public sealed class MainViewModel : INotifyPropertyChanged
+{
+    public event PropertyChangedEventHandler? PropertyChanged;
+    public void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
+    private string status = "Starting local monitoring…";
+    public string Status { get => status; set { status = value; Changed(); } }
+    public ObservableCollection<AdapterSnapshot> Adapters { get; } = [];
+    public ObservableCollection<AdapterDisplay> Ethernet { get; } = [];
+    public ObservableCollection<WifiDisplay> Wifi { get; } = [];
+    public ObservableCollection<ProcessDisplay> Applications { get; } = [];
+    public ObservableCollection<string> Events { get; } = [];
+    public ObservableCollection<string> Usage { get; } = [];
+    public ObservableCollection<double?> Downloads { get; } = [];
+    public ObservableCollection<double?> Uploads { get; } = [];
+    public ISeries[] Series { get; }
+    public Axis[] XAxes { get; } = [new() { IsVisible = false }];
+    public Axis[] YAxes { get; } = [new() { Name = "Mbps", MinLimit = 0, Labeler = value => value.ToString("0.##") }];
+    private AdapterSnapshot? selected;
+    private readonly Dictionary<string, (long Down, long Up)> session = [];
+    private MonitoringSnapshot? latest;
+    public IReadOnlyList<ProcessConnections> Processes => latest?.Applications ?? [];
+    public AdapterSnapshot? Selected
+    {
+        get => selected;
+        set
+        {
+            if (selected?.Id != value?.Id) { Downloads.Clear(); Uploads.Clear(); }
+            selected = value; NotifyMetrics(); Changed();
+        }
+    }
+    public string Download => FormatRate(selected?.DownloadBytesPerSecond);
+    public string Upload => FormatRate(selected?.UploadBytesPerSecond);
+    public string LinkSpeed => selected?.LinkBitsPerSecond is { } bits ? FormatRate(bits / 8d) : "Unavailable";
+    public string Connection => selected is null ? "No adapter" : selected.State;
+    public string AdapterName => selected?.Name ?? "Waiting for adapters";
+    public string AdapterDescription => selected?.Description ?? "No telemetry yet";
+    public string SessionUsage => selected is not null && session.TryGetValue(selected.Id, out var total) ? $"↓ {Bytes(total.Down)}    ↑ {Bytes(total.Up)}" : "Waiting for measured intervals";
+    public string MeasurementDetail => selected is null ? "Unavailable" : $"{selected.Timestamp.ToLocalTime():HH:mm:ss} · {selected.Availability} · NetworkInterface counters · {selected.Type}";
+    public string Gateway => selected is null ? "Unavailable" : selected.HasGateway ? "Configured; reachability not tested" : "No gateway configured";
+    public string Internet => "Not tested · run target diagnostics";
+    public string CounterDetail => selected is null ? "Unavailable" : $"Errors: {selected.Errors?.ToString() ?? "Unavailable"} · Discards: {selected.Discards?.ToString() ?? "Unavailable"} · Since adapter counters began";
+    public string AddressDetail => selected is null ? "Unavailable" : selected.Addresses.Length == 0 ? "Address collection disabled or no addresses available" : $"IP: {string.Join(", ", selected.Addresses)}\nGateway: {string.Join(", ", selected.Gateways)}\nDNS: {string.Join(", ", selected.DnsServers)}";
+    public string DiagnosticText { get; set; } = "No diagnostic run yet. Tests send DNS queries and 10 ICMP echo requests to the target you choose.";
+    public string LastUpdated => latest is null ? "Waiting" : $"Updated {latest.Timestamp.ToLocalTime():HH:mm:ss} · every 2 seconds";
+    public MainViewModel()
+    {
+        Series = [new LineSeries<double?> { Name = "Download", Values = Downloads, GeometrySize = 0, LineSmoothness = 0.25, Stroke = new SolidColorPaint(SKColor.Parse("#26D9C4"), 3), Fill = new SolidColorPaint(SKColor.Parse("#26D9C4").WithAlpha(25)) },
+            new LineSeries<double?> { Name = "Upload", Values = Uploads, GeometrySize = 0, LineSmoothness = 0.25, Stroke = new SolidColorPaint(SKColor.Parse("#6C9EFF"), 2), Fill = null }];
+    }
+    public void Apply(MonitoringSnapshot snapshot)
+    {
+        latest = snapshot;
+        if (snapshot.SessionTotals is not null)
+            foreach (var pair in snapshot.SessionTotals) session[pair.Key] = (pair.Value.Down, pair.Value.Up);
+        var ordered = snapshot.Adapters.OrderByDescending(a => a.State == "Up" && a.HasGateway).ThenByDescending(a => a.State == "Up").ThenBy(a => a.Name).ToArray();
+        var id = selected?.Id;
+        if (!Adapters.Select(a => a.Id).SequenceEqual(ordered.Select(a => a.Id)))
+        { Adapters.Clear(); foreach (var adapter in ordered) Adapters.Add(adapter); }
+        Selected = ordered.FirstOrDefault(a => a.Id == id) ?? ordered.FirstOrDefault();
+        Downloads.Add(selected?.DownloadBytesPerSecond * 8 / 1_000_000); Uploads.Add(selected?.UploadBytesPerSecond * 8 / 1_000_000);
+        while (Downloads.Count > 90) Downloads.RemoveAt(0);
+        while (Uploads.Count > 90) Uploads.RemoveAt(0);
+        Ethernet.Clear(); foreach (var adapter in ordered.Where(a => a.Type.Contains("Ethernet"))) Ethernet.Add(new(adapter));
+        Wifi.Clear(); foreach (var item in snapshot.Wifi) Wifi.Add(new(item));
+        if (snapshot.Error is not null) Status = snapshot.Error;
+        Changed(nameof(LastUpdated));
+    }
+    public void FilterApplications(string query)
+    {
+        Applications.Clear();
+        foreach (var row in Processes.Where(p => p.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || p.Pid.ToString().Contains(query)).Take(300)) Applications.Add(new(row));
+    }
+    public void AddEvents(IReadOnlyList<ConnectionEvent> events)
+    {
+        foreach (var item in events) Events.Insert(0, $"{item.Timestamp.ToLocalTime():g}   {item.AdapterName}   {item.PreviousState} → {item.State}");
+        while (Events.Count > 200) Events.RemoveAt(Events.Count - 1);
+    }
+    public void ClearSession() { session.Clear(); Downloads.Clear(); Uploads.Clear(); NotifyMetrics(); }
+    private void NotifyMetrics()
+    { foreach (var name in new[] { nameof(Download), nameof(Upload), nameof(Connection), nameof(LinkSpeed), nameof(AdapterName), nameof(AdapterDescription), nameof(SessionUsage), nameof(MeasurementDetail), nameof(Gateway), nameof(CounterDetail), nameof(AddressDetail) }) Changed(name); }
+    public static string FormatRate(double? bytes) => bytes is null ? "Unavailable" : bytes < 125_000 ? $"{bytes * 8 / 1_000:0.0} Kbps" : $"{bytes * 8 / 1_000_000:0.00} Mbps";
+    public static string Bytes(long value) => value >= 1L << 30 ? $"{value / (double)(1L << 30):0.00} GiB" : value >= 1L << 20 ? $"{value / (double)(1L << 20):0.00} MiB" : $"{value / 1024d:0.0} KiB";
+}
+public sealed record AdapterDisplay(AdapterSnapshot Value)
+{
+    public string Title => $"{Value.Name} · {Value.State}";
+    public string Summary => $"↓ {MainViewModel.FormatRate(Value.DownloadBytesPerSecond)}   ↑ {MainViewModel.FormatRate(Value.UploadBytesPerSecond)}   Link: {MainViewModel.FormatRate(Value.LinkBitsPerSecond / 8d)}";
+    public string Detail => $"{Value.Description}\n{Value.Availability} · {Value.Timestamp.ToLocalTime():T} · Errors {Value.Errors?.ToString() ?? "Unavailable"}, discards {Value.Discards?.ToString() ?? "Unavailable"}";
+}
+public sealed record WifiDisplay(WifiSnapshot Value)
+{
+    public string Title => Value.Ssid ?? $"Wi-Fi · {Value.State}";
+    public string Summary => $"Signal: {(Value.SignalPercent is { } signal ? signal + "%" : "Unavailable")} · RX link: {Value.ReceiveKbps?.ToString() ?? "Unavailable"} Kbps · TX link: {Value.TransmitKbps?.ToString() ?? "Unavailable"} Kbps";
+    public string Detail => $"{Value.Availability} · {Value.Timestamp.ToLocalTime():T} · {Value.Authentication ?? "Security unavailable"}\n{Value.Detail}";
+}
+public sealed record ProcessDisplay(ProcessConnections Value)
+{
+    public string Name => Value.Name;
+    public string Summary => $"PID {Value.Pid} · TCP {Value.TcpConnections} · UDP {Value.UdpEndpoints} · started {Value.StartedAt?.ToLocalTime().ToString("g") ?? "unavailable"}";
+    public string Detail => $"{Value.Availability} · {Value.Detail}";
+}
