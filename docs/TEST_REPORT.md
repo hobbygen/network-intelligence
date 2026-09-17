@@ -54,8 +54,12 @@ Manual test: `scripts/service-run-foreground.ps1`-equivalent elevated run of `Ne
 
 This validates the IPC and continuous-collection design end to end. It is not an accuracy or security certification — see remaining acceptance work below.
 
+## Controlled-traffic accuracy test (2026-09-17, see `docs/ETW_ACCURACY.md`)
+
+`--accuracy-test-mib` sent exact, independently-tallied 1 MiB and 100 MiB transfers over a loopback TCP socket and compared them against the MonitoringService's ETW-attributed totals for the same PID: **0% delta in both directions at both sizes, 0 events lost.** Narrow scope — loopback, single process, single connection, high throughput; concurrent processes, real adapters, UDP-against-reference and low-rate/long-duration cases remain open.
+
 ## Remaining acceptance work
 
-Controlled known-byte-traffic comparison for ETW accounting; IPv6/UDP endpoint semantics; adapter disambiguation for per-process events; process-restart attribution; ETW session CPU/memory overhead benchmark; Wi-Fi SSID/signal/channel/security; internet/gateway reachability; adapter switching/sleep; MonitoringService code signing, dedicated least-privileged service account, automated unauthorized-client access tests, and a real client wired into the main App/Infrastructure; Windows 10 and clean Windows 11 installs; storage/migrations/retention; speed provider integration; UI behavior/accessibility; anomaly detection; long-duration/high-throughput benchmarks; signed release packaging.
+Controlled known-byte-traffic comparison for concurrent processes, real/physical adapters, UDP against a byte-exact reference, and low-rate/long-duration traffic; adapter disambiguation for per-process events; process-restart attribution; ETW session CPU/memory overhead benchmark; Wi-Fi SSID/signal/channel/security; internet/gateway reachability; adapter switching/sleep; MonitoringService code signing, dedicated least-privileged service account, automated unauthorized-client access tests, and a real client wired into the main App/Infrastructure; Windows 10 and clean Windows 11 installs; storage/migrations/retention; speed provider integration; UI behavior/accessibility; anomaly detection; long-duration/high-throughput benchmarks; signed release packaging.
 
 The Application Usage feature is not implemented in the app; the ETW mechanism and the elevated service that serves it have only been validated manually and standalone, never wired into the WinUI App. Phase 0/1 are not fully complete and no production-readiness claim is made.

@@ -8,13 +8,23 @@ using NetworkIntelligence.Domain;
 if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("Windows required."); return 1; }
 if (args.Contains("--help"))
 {
-    Console.WriteLine("--samples 2..60 (default 5) --target hostname-or-IP (optional) --etw-seconds 1..60 (optional) --service-status (optional)\nPassive by default. --target resolves DNS and sends five ICMP probes. --etw-seconds attempts a kernel network ETW session.\n--service-status connects to the optional MonitoringService pipe and exits; it does not run the adapter probe.\nJSON lines to stdout. No IP addresses, MACs, SSIDs, executable paths or payloads are saved.");
+    Console.WriteLine("--samples 2..60 (default 5) --target hostname-or-IP (optional) --etw-seconds 1..60 (optional) --service-status (optional) --accuracy-test-mib N (optional)\nPassive by default. --target resolves DNS and sends five ICMP probes. --etw-seconds attempts a kernel network ETW session.\n--service-status connects to the optional MonitoringService pipe and exits; it does not run the adapter probe.\n--accuracy-test-mib sends N MiB over a loopback socket and compares against the running MonitoringService's ETW attribution; requires the service already running elevated.\nJSON lines to stdout. No IP addresses, MACs, SSIDs, executable paths or payloads are saved.");
     return 0;
 }
 if (args.Contains("--service-status"))
 {
     var jsonOptions = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
     Console.WriteLine(JsonSerializer.Serialize(await ServiceStatusProbe.RunAsync(5), jsonOptions));
+    return 0;
+}
+int accuracyIndex = Array.IndexOf(args, "--accuracy-test-mib");
+if (accuracyIndex >= 0)
+{
+    if (accuracyIndex + 1 >= args.Length || !double.TryParse(args[accuracyIndex + 1], out var mib) || mib is <= 0 or > 1024)
+    { Console.Error.WriteLine("--accuracy-test-mib requires a value between 0 and 1024."); return 2; }
+    using var accuracyCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+    var jsonOptions = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
+    Console.WriteLine(JsonSerializer.Serialize(await AccuracyProbe.RunAsync((long)(mib * 1024 * 1024), accuracyCancellation.Token), jsonOptions));
     return 0;
 }
 int samples = 5;

@@ -52,6 +52,7 @@ powershell -NoProfile -File scripts/service-run-foreground.ps1
 
 # From an ordinary, unelevated shell while the above is running:
 dotnet run --no-build --project tools/NetworkIntelligence.TelemetryProbe -- --service-status
+dotnet run --no-build --project tools/NetworkIntelligence.TelemetryProbe -- --accuracy-test-mib 100
 
 # Install/uninstall as a Windows Service (Manual start; does not start automatically), elevated:
 powershell -NoProfile -File scripts/service-install.ps1
@@ -69,7 +70,8 @@ powershell -NoProfile -File scripts/service-uninstall.ps1
 - [Validation plan](docs/VALIDATION_PLAN.md)
 - [Test report](docs/TEST_REPORT.md)
 - [ETW per-application telemetry proof-of-concept](docs/ETW_VALIDATION.md)
+- [ETW controlled-traffic accuracy test](docs/ETW_ACCURACY.md)
 
 The original requirements remain unchanged in `NETWORK_INTELLIGENCE.md`. Per-application bandwidth, baselines/anomalies, health scoring, signed installation and complete Windows 10 validation are still outstanding. Missing telemetry is displayed as unavailable.
 
-The elevated kernel-ETW mechanism for per-application byte accounting is validated (`docs/ETW_VALIDATION.md`) and now has a working `MonitoringService` scaffold with secure named-pipe IPC (`docs/DECISIONS.md` ADR-007) — not yet part of the app. A controlled known-traffic accuracy comparison, code signing, a dedicated service account, and wiring an actual client into the App are still required before this becomes a product feature.
+The elevated kernel-ETW mechanism for per-application byte accounting is validated (`docs/ETW_VALIDATION.md`), has a working `MonitoringService` scaffold with secure named-pipe IPC (`docs/DECISIONS.md` ADR-007), and passed a controlled-traffic accuracy test at 1 MiB/100 MiB on loopback with 0% delta (`docs/ETW_ACCURACY.md`, ADR-008) — none of it is part of the app yet. Broader accuracy testing (concurrent processes, real adapters, UDP), code signing, a dedicated service account, and wiring an actual client into the App are still required before this becomes a product feature.
