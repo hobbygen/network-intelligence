@@ -21,6 +21,7 @@ public sealed partial class MainWindow : Window
     private CancellationTokenSource? speedCancellation;
     private readonly Dictionary<string, DateTimeOffset> lastAlert = [];
     private IReadOnlyList<UsageSummary> usage = [];
+    private IReadOnlyList<ApplicationUsageSummary> appUsage = [];
     private DiagnosticResult? lastDiagnostic;
     private string currentPage = "Dashboard";
     private MonitoringSnapshot? pendingSnapshot;
@@ -225,6 +226,10 @@ public sealed partial class MainWindow : Window
         var events = await Task.Run(() => store.GetEventsAsync(CancellationToken.None));
         ViewModel.Events.Clear(); ViewModel.AddEvents(events.Reverse().ToArray());
         if (events.Count == 0) ViewModel.Events.Add("No connection transitions observed yet.");
+        appUsage = await Task.Run(() => store.GetApplicationUsageAsync(from, CancellationToken.None));
+        ViewModel.AppUsage.Clear();
+        foreach (var row in appUsage) ViewModel.AppUsage.Add($"{row.ProcessName} (PID {row.Pid})\n↓ {MainViewModel.Bytes(row.ReceivedBytes)}    ↑ {MainViewModel.Bytes(row.SentBytes)}\n{row.Windows:N0} five-second windows · {row.First.ToLocalTime():g} – {row.Last.ToLocalTime():g}");
+        if (appUsage.Count == 0) ViewModel.AppUsage.Add("No stored per-application history yet — requires the optional MonitoringService to have been running during this range.");
     }
     private async void RefreshHistory(object sender, RoutedEventArgs e)
     {
@@ -246,6 +251,11 @@ public sealed partial class MainWindow : Window
                 if (lastDiagnostic is null) { ViewModel.Status = "Run diagnostics before exporting a result."; return; }
                 var result = monitoring.Settings.CollectAddresses ? lastDiagnostic : lastDiagnostic with { Target = "[redacted]" };
                 await File.WriteAllTextAsync(file.Path, JsonSerializer.Serialize(new { SchemaVersion = 1, Source = "DNS / ICMP", Result = result }, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            else if (currentPage == "Applications")
+            {
+                await LoadHistoryAsync();
+                await ExportService.WriteApplicationUsageAsync(file.Path, appUsage, file.FileType.Equals(".json", StringComparison.OrdinalIgnoreCase), CancellationToken.None);
             }
             else
             {

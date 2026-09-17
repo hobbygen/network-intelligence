@@ -21,6 +21,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<AppTrafficDisplay> LiveApplicationTraffic { get; } = [];
     public ObservableCollection<string> Events { get; } = [];
     public ObservableCollection<string> Usage { get; } = [];
+    public ObservableCollection<string> AppUsage { get; } = [];
     public ObservableCollection<double?> Downloads { get; } = [];
     public ObservableCollection<double?> Uploads { get; } = [];
     public ISeries[] Series { get; }

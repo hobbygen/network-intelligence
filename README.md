@@ -13,7 +13,7 @@ Use the self-contained package in `artifacts/NetworkIntelligence-0.2.0-win-x64.z
 - WinUI 3 sidebar with nine pages, system/light/dark appearance, native tray and pause/resume.
 - Real adapter discovery, counter deltas, directional throughput, bounded LiveCharts graphs and session totals.
 - Native Wi-Fi association details with denied/unavailable states.
-- IPv4/IPv6 TCP/UDP ownership and process-instance metadata, always available. Live per-app **byte accounting** when the separate optional MonitoringService is installed and running — off by default, not accuracy-certified beyond a narrow loopback test (see below).
+- IPv4/IPv6 TCP/UDP ownership and process-instance metadata, always available. Live and stored (minute-aggregated) per-app **byte accounting** when the separate optional MonitoringService is installed and running — off by default, not accuracy-certified beyond a narrow loopback test, grouping is by PID+process name rather than a stable app identity (see below).
 - SQLite migrations, minute aggregates, connection events, configurable retention (365 days default), integrity check and explicit history deletion.
 - User-initiated DNS/ICMP diagnostics with cancellation; configurable manual HTTPS transfer test.
 - Privacy controls, connection notifications with quiet hours/cooldown, CSV and JSON exports.

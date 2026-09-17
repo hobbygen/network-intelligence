@@ -69,6 +69,12 @@ Extended `--smoke-test` with `--smoke-page <name>` to render a chosen page (prev
 
 Both renders produced via `dotnet run --project src/NetworkIntelligence.App -- --smoke-test --data-dir <dir> --smoke-page Applications`, screenshots reviewed directly. This is UI-wiring verification, not a UI automation test suite (spec section 16.2 still open) and not an accuracy claim beyond ADR-008's narrow loopback result.
 
+## Per-application history persistence (2026-09-17, see `docs/DECISIONS.md` ADR-010)
+
+`ApplicationTrafficMinutes` (schema version 2) stores minute aggregates of `MonitoringService` snapshots, following the same pattern as adapter `TrafficMinutes`. 4 new xUnit tests: aggregation across multiple saves into one minute bucket, an `Unavailable` snapshot writes nothing, retention/deletion behave the same as adapter history, JSON/CSV export round-trips. All passing (32/32 total).
+
+Also verified against a real elevated service run: launched the app fresh against a clean database with the service running and live traffic present, then queried the resulting `.db` file directly (a throwaway `Microsoft.Data.Sqlite` reader, not the app). Confirmed both migrations applied in one pass (`SchemaMigrations` rows for version 1 and 2, same `AppliedUtc`, as expected for a fresh database) and real aggregated rows, including one process (PID 27684) with `Windows=2` — direct proof that two separate 5-second service windows were correctly summed into a single minute bucket rather than overwritten. Not yet covered: long-duration/high-row-count behavior.
+
 ## Remaining acceptance work
 
 Controlled known-byte-traffic comparison for concurrent processes, real/physical adapters, UDP against a byte-exact reference, and low-rate/long-duration traffic; adapter disambiguation for per-process events; process-restart attribution; ETW session CPU/memory overhead benchmark; Wi-Fi SSID/signal/channel/security; internet/gateway reachability; adapter switching/sleep; MonitoringService code signing, dedicated least-privileged service account, automated unauthorized-client access tests, and a real client wired into the main App/Infrastructure; Windows 10 and clean Windows 11 installs; storage/migrations/retention; speed provider integration; UI behavior/accessibility; anomaly detection; long-duration/high-throughput benchmarks; signed release packaging.

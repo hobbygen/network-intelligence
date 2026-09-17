@@ -35,6 +35,9 @@ public sealed class MonitoringService(INetworkCollector collector, IHistoryStore
                 if (paused) continue;
                 var snapshot = await applicationTraffic.GetSnapshotAsync(stop.Token);
                 ApplicationTraffic?.Invoke(snapshot);
+                try { await store.SaveApplicationTrafficAsync(snapshot, stop.Token); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                { logger.LogError("Application traffic history write failed: {Type}", ex.GetType().Name); }
             } while (await timer.WaitForNextTickAsync(stop.Token));
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }

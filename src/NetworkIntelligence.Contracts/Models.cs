@@ -21,6 +21,11 @@ public sealed record DiagnosticResult(DateTimeOffset Timestamp, string Target, d
 public sealed record UsageSummary(string AdapterId, string AdapterName, long DownloadBytes, long UploadBytes,
     long Samples, double CoveredSeconds, DateTimeOffset First, DateTimeOffset Last);
 public sealed record HistoryPoint(DateTimeOffset Timestamp, double? DownloadBytesPerSecond, double? UploadBytesPerSecond);
+/// <summary>Grouped by (Pid, ProcessName) per minute bucket, not a stable application identity — a PID reused by a
+/// different process within the same minute lands in the same row. Only ever populated from Measured
+/// MonitoringService snapshots (see docs/DECISIONS.md ADR-007/009).</summary>
+public sealed record ApplicationUsageSummary(int Pid, string ProcessName, long ReceivedBytes, long SentBytes,
+    long Windows, DateTimeOffset First, DateTimeOffset Last);
 
 public sealed record AppSettings
 {
@@ -61,6 +66,10 @@ public interface IHistoryStore
     Task<int> CleanupAsync(int retentionDays, CancellationToken token);
     Task DeleteHistoryAsync(CancellationToken token);
     Task<string> CheckIntegrityAsync(CancellationToken token);
+    /// <summary>No-ops when <paramref name="snapshot"/>.Availability isn't Measured — never persists an
+    /// unavailable/error window as if it were zero traffic.</summary>
+    Task SaveApplicationTrafficAsync(ServiceSnapshot snapshot, CancellationToken token);
+    Task<IReadOnlyList<ApplicationUsageSummary>> GetApplicationUsageAsync(DateTimeOffset from, CancellationToken token);
 }
 /// <summary>Talks to the optional, elevated MonitoringService (docs/DECISIONS.md ADR-007) over its named pipe.
 /// Never throws: any failure to reach the service — not installed, not running, access denied — is reported as

@@ -13,6 +13,8 @@ public sealed class StorageTests : IAsyncLifetime
     public Task DisposeAsync() { SqliteConnection.ClearAllPools(); Directory.Delete(directory, true); return Task.CompletedTask; }
     private static MonitoringSnapshot Sample(DateTimeOffset time, long? down, long? up) => new(time,
         [new("a", "Ethernet", "test", "Ethernet", "Up", 1_000_000_000, 1000, 2000, 0, 0, down / 2d, up / 2d, down, up, 2, true, [], [], [], time, Availability.Measured)], [], [], null);
+    private static ServiceSnapshot ServiceSample(DateTimeOffset windowEnd, int pid, string name, long received, long sent, string availability = "Measured") =>
+        new(windowEnd, TimeSpan.FromSeconds(5), 0, [new(pid, name, received / 5, sent / 5, received, sent, 3, windowEnd.AddSeconds(-5), windowEnd)], availability, "test");
     [Fact] public async Task MigrationIsIdempotentAndIntegrityPasses()
     { await store.InitializeAsync(default); Assert.Equal("ok", await store.CheckIntegrityAsync(default)); }
     [Fact] public async Task AggregatesDeltasWithoutTreatingMissingAsZero()
@@ -47,6 +49,39 @@ public sealed class StorageTests : IAsyncLifetime
         Assert.Contains("\"DownloadBytes\": 100", await File.ReadAllTextAsync(path));
         path = Path.Combine(directory, "export.csv"); await ExportService.WriteUsageAsync(path, rows, false, default);
         Assert.Contains("CoveredSeconds", await File.ReadAllTextAsync(path));
+    }
+    [Fact] public async Task ApplicationTrafficAggregatesByMinutePidAndName()
+    {
+        var minute = new DateTimeOffset(2026, 1, 1, 12, 0, 30, TimeSpan.Zero); // same minute bucket as +20s below
+        await store.SaveApplicationTrafficAsync(ServiceSample(minute, 4242, "test.exe", 1000, 200), default);
+        await store.SaveApplicationTrafficAsync(ServiceSample(minute.AddSeconds(20), 4242, "test.exe", 500, 100), default);
+        var row = Assert.Single(await store.GetApplicationUsageAsync(DateTimeOffset.MinValue, default));
+        Assert.Equal(4242, row.Pid); Assert.Equal("test.exe", row.ProcessName);
+        Assert.Equal(1500, row.ReceivedBytes); Assert.Equal(300, row.SentBytes); Assert.Equal(2, row.Windows);
+    }
+    [Fact] public async Task UnavailableApplicationSnapshotIsNeverPersisted()
+    {
+        await store.SaveApplicationTrafficAsync(ServiceSample(DateTimeOffset.UtcNow, 1, "x", 100, 100, "Unavailable"), default);
+        Assert.Empty(await store.GetApplicationUsageAsync(DateTimeOffset.MinValue, default));
+    }
+    [Fact] public async Task ApplicationTrafficRetentionAndDeletionMatchAdapterHistory()
+    {
+        await store.SaveApplicationTrafficAsync(ServiceSample(DateTimeOffset.UtcNow.AddDays(-400), 1, "old.exe", 100, 100), default);
+        await store.SaveApplicationTrafficAsync(ServiceSample(DateTimeOffset.UtcNow, 2, "recent.exe", 200, 200), default);
+        await store.CleanupAsync(365, default);
+        var remaining = Assert.Single(await store.GetApplicationUsageAsync(DateTimeOffset.MinValue, default));
+        Assert.Equal("recent.exe", remaining.ProcessName);
+        await store.DeleteHistoryAsync(default);
+        Assert.Empty(await store.GetApplicationUsageAsync(DateTimeOffset.MinValue, default));
+    }
+    [Fact] public async Task ApplicationUsageJsonAndCsvExportRealAggregates()
+    {
+        await store.SaveApplicationTrafficAsync(ServiceSample(DateTimeOffset.UtcNow, 99, "sample.exe", 4096, 512), default);
+        var rows = await store.GetApplicationUsageAsync(DateTimeOffset.MinValue, default);
+        var path = Path.Combine(directory, "app-export.json"); await ExportService.WriteApplicationUsageAsync(path, rows, true, default);
+        Assert.Contains("\"ReceivedBytes\": 4096", await File.ReadAllTextAsync(path));
+        path = Path.Combine(directory, "app-export.csv"); await ExportService.WriteApplicationUsageAsync(path, rows, false, default);
+        Assert.Contains("sample.exe", await File.ReadAllTextAsync(path));
     }
     [Theory] [InlineData("=1+1")] [InlineData(" +cmd")] [InlineData("@formula")]
     public void CsvPreventsSpreadsheetFormulaInterpretation(string text) => Assert.StartsWith("\"'", ExportService.Csv(text));

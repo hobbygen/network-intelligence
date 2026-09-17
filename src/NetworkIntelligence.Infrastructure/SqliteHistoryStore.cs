@@ -30,8 +30,8 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
         await Execute(connection, "CREATE TABLE IF NOT EXISTS SchemaMigrations(Version INTEGER PRIMARY KEY, AppliedUtc INTEGER NOT NULL);", token);
         await using var check = connection.CreateCommand(); check.CommandText = "SELECT COALESCE(MAX(Version),0) FROM SchemaMigrations";
         var version = Convert.ToInt32(await check.ExecuteScalarAsync(token));
-        if (version > 1) throw new InvalidOperationException("Database version is newer than this application. Use a newer application build.");
-        if (version == 0)
+        if (version > 2) throw new InvalidOperationException("Database version is newer than this application. Use a newer application build.");
+        if (version < 1)
         {
             using var transaction = connection.BeginTransaction();
             await using var migration = connection.CreateCommand(); migration.Transaction = transaction;
@@ -46,6 +46,19 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
                 CREATE TABLE Diagnostics(Id INTEGER PRIMARY KEY, Time INTEGER NOT NULL, Json TEXT NOT NULL);
                 CREATE INDEX IX_Diagnostics_Time ON Diagnostics(Time);
                 INSERT INTO SchemaMigrations VALUES(1,unixepoch());
+                """;
+            await migration.ExecuteNonQueryAsync(token); transaction.Commit();
+        }
+        if (version < 2)
+        {
+            using var transaction = connection.BeginTransaction();
+            await using var migration = connection.CreateCommand(); migration.Transaction = transaction;
+            migration.CommandText = """
+                CREATE TABLE ApplicationTrafficMinutes(Pid INTEGER NOT NULL, ProcessName TEXT NOT NULL, Minute INTEGER NOT NULL,
+                    Received INTEGER NOT NULL, Sent INTEGER NOT NULL, Events INTEGER NOT NULL, Windows INTEGER NOT NULL,
+                    PRIMARY KEY(Pid,ProcessName,Minute));
+                CREATE INDEX IX_ApplicationTrafficMinutes_Time ON ApplicationTrafficMinutes(Minute);
+                INSERT INTO SchemaMigrations VALUES(2,unixepoch());
                 """;
             await migration.ExecuteNonQueryAsync(token); transaction.Commit();
         }
@@ -120,6 +133,38 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
         while (await reader.ReadAsync(token)) rows.Add(new(DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(0)), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4)));
         return rows;
     }, token);
+    public Task SaveApplicationTrafficAsync(ServiceSnapshot snapshot, CancellationToken token)
+    {
+        if (snapshot.Availability != "Measured" || snapshot.Applications.Count == 0) return Task.CompletedTask;
+        return WithConnection(async connection =>
+        {
+            using var transaction = connection.BeginTransaction();
+            long minute = snapshot.Timestamp.ToUnixTimeSeconds() / 60 * 60;
+            foreach (var sample in snapshot.Applications)
+            {
+                await using var command = connection.CreateCommand(); command.Transaction = transaction;
+                command.CommandText = """
+                    INSERT INTO ApplicationTrafficMinutes VALUES($pid,$name,$minute,$received,$sent,$events,1)
+                    ON CONFLICT(Pid,ProcessName,Minute) DO UPDATE SET Received=Received+excluded.Received,
+                    Sent=Sent+excluded.Sent, Events=Events+excluded.Events, Windows=Windows+1
+                    """;
+                command.Parameters.AddWithValue("$pid", sample.Pid); command.Parameters.AddWithValue("$name", sample.ProcessName);
+                command.Parameters.AddWithValue("$minute", minute); command.Parameters.AddWithValue("$received", sample.ReceivedBytesTotal);
+                command.Parameters.AddWithValue("$sent", sample.SentBytesTotal); command.Parameters.AddWithValue("$events", sample.Events);
+                await command.ExecuteNonQueryAsync(token);
+            }
+            transaction.Commit(); return 0;
+        }, token);
+    }
+    public Task<IReadOnlyList<ApplicationUsageSummary>> GetApplicationUsageAsync(DateTimeOffset from, CancellationToken token) => WithConnection<IReadOnlyList<ApplicationUsageSummary>>(async connection =>
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Pid,ProcessName,SUM(Received),SUM(Sent),SUM(Windows),MIN(Minute),MAX(Minute) FROM ApplicationTrafficMinutes WHERE Minute >= $from GROUP BY Pid,ProcessName ORDER BY SUM(Received)+SUM(Sent) DESC LIMIT 200";
+        command.Parameters.AddWithValue("$from", from.ToUnixTimeSeconds());
+        var rows = new List<ApplicationUsageSummary>(); await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) rows.Add(new(reader.GetInt32(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(5)), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6))));
+        return rows;
+    }, token);
     public Task SaveDiagnosticAsync(DiagnosticResult result, CancellationToken token) => WithConnection(async connection =>
     {
         await Execute(connection, "INSERT INTO Diagnostics(Time,Json) VALUES($time,$json)", token, ("$time", result.Timestamp.ToUnixTimeSeconds()), ("$json", JsonSerializer.Serialize(result))); return 0;
@@ -130,7 +175,7 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
         return WithConnection(async connection =>
         {
             int count = 0; var cutoff = DateTimeOffset.UtcNow.AddDays(-retentionDays).ToUnixTimeSeconds();
-            foreach (var (table, column) in new[] { ("TrafficMinutes", "Minute"), ("ConnectionEvents", "Time"), ("Diagnostics", "Time") })
+            foreach (var (table, column) in new[] { ("TrafficMinutes", "Minute"), ("ConnectionEvents", "Time"), ("Diagnostics", "Time"), ("ApplicationTrafficMinutes", "Minute") })
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = $"DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {column} < $cutoff LIMIT 2000)";
@@ -141,7 +186,7 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
     }
     public Task DeleteHistoryAsync(CancellationToken token) => WithConnection(async connection =>
     {
-        await Execute(connection, "BEGIN; DELETE FROM TrafficMinutes; DELETE FROM ConnectionEvents; DELETE FROM Diagnostics; DELETE FROM Adapters; COMMIT; PRAGMA wal_checkpoint(TRUNCATE);", token); return 0;
+        await Execute(connection, "BEGIN; DELETE FROM TrafficMinutes; DELETE FROM ConnectionEvents; DELETE FROM Diagnostics; DELETE FROM Adapters; DELETE FROM ApplicationTrafficMinutes; COMMIT; PRAGMA wal_checkpoint(TRUNCATE);", token); return 0;
     }, token);
     public Task<string> CheckIntegrityAsync(CancellationToken token) => WithConnection(async connection =>
     {

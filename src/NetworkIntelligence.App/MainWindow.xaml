@@ -70,8 +70,13 @@
         <TextBlock Text="{Binding ApplicationTrafficStatus}" Style="{StaticResource Caption}"/>
         <ItemsControl ItemsSource="{Binding LiveApplicationTraffic}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><StackPanel Spacing="4"><TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}"/></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
        </StackPanel></Border>
+       <Border Style="{StaticResource Card}"><StackPanel Spacing="10">
+        <TextBlock Text="Stored per-application history (optional)" FontSize="18" FontWeight="SemiBold"/>
+        <TextBlock Text="Same time range as Bandwidth and data · minute buckets grouped by process ID and name, not a stable app identity · refresh from Bandwidth and data or on next launch." Style="{StaticResource Caption}"/>
+        <ItemsControl ItemsSource="{Binding AppUsage}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><TextBlock Text="{Binding}" TextWrapping="Wrap"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+       </StackPanel></Border>
        <TextBox x:Name="ApplicationSearch" PlaceholderText="Search application or PID" TextChanged="SearchChanged"/>
-       <TextBlock Text="Sorted by socket count · IPv4/IPv6 TCP and UDP · live metadata only; no app history is stored." Style="{StaticResource Caption}"/>
+       <TextBlock Text="Sorted by socket count · IPv4/IPv6 TCP and UDP · live metadata only; no history stored for this list." Style="{StaticResource Caption}"/>
        <ItemsControl ItemsSource="{Binding Applications}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,10"><StackPanel Spacing="5"><TextBlock Text="{Binding Name}" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}"/></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
       </StackPanel>
       <StackPanel x:Name="HistoryPage" Spacing="16" Visibility="Collapsed"><TextBlock Text="Observed adapter transitions · latest 200 events" FontSize="20"/><TextBlock Text="Events are recorded while this app is monitoring. The initial state is not counted as a disconnect." TextWrapping="Wrap"/><Button Content="Refresh events" Click="RefreshHistory"/><ItemsControl ItemsSource="{Binding Events}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><TextBlock Text="{Binding}" TextWrapping="Wrap"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
