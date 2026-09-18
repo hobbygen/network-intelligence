@@ -33,6 +33,8 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         Root.DataContext = ViewModel;
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1280, 920));
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        if (File.Exists(iconPath)) AppWindow.SetIcon(iconPath);
         AppWindow.Closing += Closing;
         monitoring.Snapshot += snapshot =>
         {
@@ -68,6 +70,8 @@ public sealed partial class MainWindow : Window
         tray = new TrayIcon(WinRT.Interop.WindowNative.GetWindowHandle(this), TrayCommand);
         Navigation.SelectedItem = Navigation.MenuItems[0];
         StoragePath.Text = $"Local data: {App.DataDirectory}";
+        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        AboutVersionText.Text = version is null ? "Early access" : $"Version {version.Major}.{version.Minor}.{version.Build} · Early access";
         try
         {
             await Task.Run(() => store.InitializeAsync(CancellationToken.None));
@@ -106,7 +110,14 @@ public sealed partial class MainWindow : Window
             finally { await ShutdownAsync(); }
         }
     }
+    private bool applyingSettings;
     private void ApplySettings(AppSettings settings)
+    {
+        applyingSettings = true;
+        try { ApplySettingsCore(settings); }
+        finally { applyingSettings = false; }
+    }
+    private void ApplySettingsCore(AppSettings settings)
     {
         Retention.Value = settings.RetentionDays;
         ThemePicker.SelectedIndex = settings.Theme == "Dark" ? 2 : settings.Theme == "Light" ? 1 : 0;
@@ -119,6 +130,25 @@ public sealed partial class MainWindow : Window
         AnomalyEnabled.IsOn = settings.AnomalyDetectionEnabled; AnomalySensitivity.Value = settings.AnomalySensitivity;
         NoTrustedApplicationsText.Visibility = settings.TrustedApplications.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         TrustedApplicationsList.ItemsSource = settings.TrustedApplications;
+    }
+    /// <summary>Applies the theme immediately on selection rather than waiting for "Save settings" — previously
+    /// the theme only changed after Save, whose other fields (diagnostic target, anomaly sensitivity, retention)
+    /// can throw on <see cref="AppSettings.Validate"/> and silently block the whole save, including the theme,
+    /// with only a status-bar message easy to miss. <see cref="applyingSettings"/> guards against the
+    /// re-entrant SelectionChanged this fires when <see cref="ApplySettingsCore"/> sets <see
+    /// cref="ThemePicker"/>.SelectedIndex itself (on load, and after a real Save).</summary>
+    private async void ThemeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!loaded || applyingSettings) return;
+        string theme = ThemePicker.SelectedIndex switch { 2 => "Dark", 1 => "Light", _ => "System" };
+        Root.RequestedTheme = theme switch { "Dark" => ElementTheme.Dark, "Light" => ElementTheme.Light, _ => ElementTheme.Default };
+        try
+        {
+            var settings = monitoring.Settings with { Theme = theme };
+            await Task.Run(() => store.SaveSettingsAsync(settings, CancellationToken.None));
+            monitoring.UpdateSettings(settings); anomalyDetection.UpdateSettings(settings);
+        }
+        catch (Exception ex) { ViewModel.Status = "Theme applied, but could not be saved: " + ex.Message; }
     }
     private async void TrustApplication(object sender, RoutedEventArgs e)
     {
@@ -156,7 +186,7 @@ public sealed partial class MainWindow : Window
     private void ShowPage(string page)
     {
         currentPage = page;
-        var pages = new Dictionary<string, FrameworkElement> { ["Dashboard"] = DashboardPage, ["Ethernet"] = EthernetPage, ["Wifi"] = WifiPage, ["Performance"] = PerformancePage, ["Usage"] = UsagePage, ["Applications"] = ApplicationsPage, ["History"] = HistoryPage, ["Diagnostics"] = DiagnosticsPage, ["Settings"] = SettingsPage };
+        var pages = new Dictionary<string, FrameworkElement> { ["Dashboard"] = DashboardPage, ["Ethernet"] = EthernetPage, ["Wifi"] = WifiPage, ["Performance"] = PerformancePage, ["Usage"] = UsagePage, ["Applications"] = ApplicationsPage, ["History"] = HistoryPage, ["Diagnostics"] = DiagnosticsPage, ["Settings"] = SettingsPage, ["About"] = AboutPage };
         foreach (var item in pages) item.Value.Visibility = item.Key == page ? Visibility.Visible : Visibility.Collapsed;
         PageTitle.Text = page switch { "Dashboard" => "Network overview", "Wifi" => "Wi-Fi", "Performance" => "Network performance", "Usage" => "Bandwidth and data", "Applications" => "Application usage", "History" => "Connection history", _ => page };
         if (page == "Applications") ViewModel.FilterApplications(ApplicationSearch.Text);

@@ -25,6 +25,7 @@ internal sealed class TrayIcon : IDisposable
     [DllImport("comctl32.dll")] private static extern bool RemoveWindowSubclass(IntPtr hwnd, SubclassProc proc, UIntPtr id);
     [DllImport("comctl32.dll")] private static extern IntPtr DefSubclassProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern IntPtr LoadIcon(IntPtr instance, IntPtr name);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr LoadImage(IntPtr instance, string name, uint type, int cx, int cy, uint fuLoad);
     [DllImport("user32.dll")] private static extern IntPtr CreatePopupMenu();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool AppendMenu(IntPtr menu, uint flags, UIntPtr id, string text);
     [DllImport("user32.dll")] private static extern uint TrackPopupMenu(IntPtr menu, uint flags, int x, int y, int reserved, IntPtr hwnd, IntPtr rect);
@@ -34,6 +35,15 @@ internal sealed class TrayIcon : IDisposable
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterWindowMessage(string message);
     private readonly uint taskbarCreated = RegisterWindowMessage("TaskbarCreated");
+    /// <summary>Loaded once from the app's own icon file (Assets/AppIcon.ico, next to the exe); falls back to the
+    /// generic system application icon if the file is missing so a bad install never breaks the tray icon.</summary>
+    private static readonly IntPtr AppIcon = LoadAppIcon();
+    private static IntPtr LoadAppIcon()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        const uint imageIcon = 1, lrLoadFromFile = 0x10;
+        return File.Exists(path) ? LoadImage(IntPtr.Zero, path, imageIcon, 16, 16, lrLoadFromFile) : IntPtr.Zero;
+    }
     private NotifyData Data() => new() { Size = (uint)Marshal.SizeOf<NotifyData>(), Window = hwnd, Id = 1, Tip = "Network Intelligence", Info = "", Title = "" };
     public bool Available => added;
     public TrayIcon(IntPtr window, Action<string> onCommand)
@@ -44,7 +54,7 @@ internal sealed class TrayIcon : IDisposable
     }
     private void Add()
     {
-        var data = Data(); data.Flags = 1 | 2 | 4; data.Callback = CallbackMessage; data.Icon = LoadIcon(IntPtr.Zero, (IntPtr)32516);
+        var data = Data(); data.Flags = 1 | 2 | 4; data.Callback = CallbackMessage; data.Icon = AppIcon != IntPtr.Zero ? AppIcon : LoadIcon(IntPtr.Zero, (IntPtr)32516);
         added = Shell_NotifyIcon(0, ref data);
     }
     public void Update(string text)

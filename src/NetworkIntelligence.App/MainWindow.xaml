@@ -21,6 +21,9 @@
     <NavigationViewItem Content="Connection history" Tag="History"><NavigationViewItem.Icon><FontIcon Glyph="&#xE81C;"/></NavigationViewItem.Icon></NavigationViewItem>
     <NavigationViewItem Content="Diagnostics" Tag="Diagnostics"><NavigationViewItem.Icon><FontIcon Glyph="&#xE90F;"/></NavigationViewItem.Icon></NavigationViewItem>
    </NavigationView.MenuItems>
+   <NavigationView.FooterMenuItems>
+    <NavigationViewItem Content="About" Tag="About"><NavigationViewItem.Icon><FontIcon Glyph="&#xE946;"/></NavigationViewItem.Icon></NavigationViewItem>
+   </NavigationView.FooterMenuItems>
    <NavigationView.PaneFooter><StackPanel Margin="16,12" Spacing="8"><TextBlock Text="ON THIS DEVICE" Style="{StaticResource Caption}"/><TextBlock Text="Private by design" FontSize="13"/><TextBlock Text="Early access · 0.2" Style="{StaticResource Caption}"/></StackPanel></NavigationView.PaneFooter>
    <Grid Padding="28,12,28,16" RowSpacing="20">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -96,7 +99,7 @@
        <Border Style="{StaticResource Card}"><StackPanel Spacing="8"><TextBlock Text="Selected adapter configuration" FontSize="20"/><TextBlock Text="{Binding AddressDetail}" TextWrapping="Wrap"/><TextBlock Text="{Binding Gateway}" TextWrapping="Wrap"/><Button Content="Check database integrity" Click="IntegrityClicked"/></StackPanel></Border>
       </StackPanel>
       <StackPanel x:Name="SettingsPage" Spacing="18" Visibility="Collapsed">
-       <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Monitoring and appearance" FontSize="20"/><NumberBox x:Name="Retention" Header="History retention (days)" Minimum="1" Maximum="3650" Value="365" SpinButtonPlacementMode="Inline" Width="230" HorizontalAlignment="Left"/><ComboBox x:Name="ThemePicker" Header="Theme" SelectedIndex="0"><ComboBoxItem Content="System"/><ComboBoxItem Content="Light"/><ComboBoxItem Content="Dark"/></ComboBox><ToggleSwitch x:Name="CloseToTray" Header="Keep monitoring when the window closes" IsOn="True"/><TextBlock Text="When enabled, use the tray icon to reopen the window or Exit to stop monitoring. The app does not start automatically with Windows." TextWrapping="Wrap" Style="{StaticResource Caption}"/></StackPanel></Border>
+       <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Monitoring and appearance" FontSize="20"/><NumberBox x:Name="Retention" Header="History retention (days)" Minimum="1" Maximum="3650" Value="365" SpinButtonPlacementMode="Inline" Width="230" HorizontalAlignment="Left"/><ComboBox x:Name="ThemePicker" Header="Theme" SelectedIndex="0" SelectionChanged="ThemeChanged"><ComboBoxItem Content="System"/><ComboBoxItem Content="Light"/><ComboBoxItem Content="Dark"/></ComboBox><ToggleSwitch x:Name="CloseToTray" Header="Keep monitoring when the window closes" IsOn="True"/><TextBlock Text="When enabled, use the tray icon to reopen the window or Exit to stop monitoring. The app does not start automatically with Windows." TextWrapping="Wrap" Style="{StaticResource Caption}"/></StackPanel></Border>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Privacy" FontSize="20"/><ToggleSwitch x:Name="CollectAddresses" Header="Show local IP, gateway and DNS addresses"/><ToggleSwitch x:Name="CollectSsid" Header="Show Wi-Fi network name (SSID)"/><ToggleSwitch x:Name="CollectNames" Header="Show process names" IsOn="True"/><TextBlock Text="These details stay in live memory. Addresses, SSIDs, executable paths, remote destinations and application histories are not stored. Packet payloads are never collected." TextWrapping="Wrap"/></StackPanel></Border>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Connection notifications" FontSize="20"/><ToggleSwitch x:Name="AlertsEnabled" Header="Notify about adapter disconnections" IsOn="True"/><ToggleSwitch x:Name="QuietEnabled" Header="Quiet hours"/><StackPanel Orientation="Horizontal" Spacing="12"><NumberBox x:Name="QuietStart" Header="Start hour" Minimum="0" Maximum="23" Value="22" Width="140"/><NumberBox x:Name="QuietEnd" Header="End hour" Minimum="0" Maximum="23" Value="7" Width="140"/></StackPanel><TextBlock Text="Local time · also gates anomaly notifications below · native tray notifications" Style="{StaticResource Caption}"/></StackPanel></Border>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
@@ -109,6 +112,20 @@
         <ItemsControl x:Name="TrustedApplicationsList"><ItemsControl.ItemTemplate><DataTemplate><Grid ColumnSpacing="12" Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding}" VerticalAlignment="Center"/><Button Grid.Column="1" Content="Untrust" Click="UntrustApplication"/></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
        </StackPanel></Border>
        <StackPanel Orientation="Horizontal" Spacing="12"><Button Content="Save settings" Click="SaveSettings"/><Button Content="Delete stored history…" Click="DeleteHistory"/></StackPanel><TextBlock x:Name="StoragePath" TextWrapping="Wrap" Style="{StaticResource Caption}"/>
+      </StackPanel>
+      <StackPanel x:Name="AboutPage" Spacing="18" Visibility="Collapsed">
+       <Border Style="{StaticResource Card}"><StackPanel Spacing="16">
+        <StackPanel Orientation="Horizontal" Spacing="18">
+         <Image Source="Assets/AppIcon.png" Width="72" Height="72"/>
+         <StackPanel Spacing="4" VerticalAlignment="Center">
+          <TextBlock Text="Network Intelligence" FontSize="24" FontWeight="SemiBold"/>
+          <TextBlock x:Name="AboutVersionText" Style="{StaticResource Caption}"/>
+         </StackPanel>
+        </StackPanel>
+        <TextBlock Text="Local Windows network monitoring, diagnostics and explainable per-application anomaly detection. No mandatory cloud service or external AI." TextWrapping="Wrap"/>
+        <TextBlock Text="Created by Naeem Ahmad" FontSize="16" FontWeight="SemiBold"/>
+        <TextBlock Text="All monitoring, diagnostics and history stay on this device. See Settings for privacy controls and Diagnostics for advanced network tests." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+       </StackPanel></Border>
       </StackPanel>
      </Grid>
     </ScrollViewer>
