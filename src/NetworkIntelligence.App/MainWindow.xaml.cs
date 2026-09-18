@@ -221,6 +221,19 @@ public sealed partial class MainWindow : Window
         ViewModel.AddAlert(anomaly);
         if (anomaly.Notified) tray?.Notify("Unusual network activity detected", $"{anomaly.ProcessName}: {anomaly.Explanation}");
     }
+    private static readonly TimeSpan SnoozeDuration = TimeSpan.FromHours(1);
+    private void SnoozeAlert(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: AlertDisplay alert }) return;
+        anomalyDetection.Snooze(alert.Value.ProcessName, alert.Value.Direction, SnoozeDuration);
+        ViewModel.RemoveAlert(alert);
+        ViewModel.Status = $"{alert.Value.ProcessName} ({alert.Value.Direction.ToLowerInvariant()}) snoozed for 1 hour — evidence already stored is kept.";
+    }
+    private void DismissAlert(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: AlertDisplay alert }) return;
+        ViewModel.RemoveAlert(alert);
+    }
     private async void DiagnosticsClicked(object sender, RoutedEventArgs e)
     {
         if (diagnosticCancellation is not null) return;

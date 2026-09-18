@@ -8,6 +8,10 @@ namespace NetworkIntelligence.Application;
 public sealed class AnomalyTracker(TimeSpan minimumSustained, TimeSpan cooldown)
 {
     private readonly Dictionary<(string ProcessName, AnomalyDirection Direction), (DateTimeOffset FirstAnomalousAt, DateTimeOffset? LastAlertAt)> state = [];
+    /// <summary>User-requested suppression (section 10.6's "snooze," distinct from the automatic <paramref
+    /// name="cooldown"/> above and from a permanent trust exclusion). Not persisted — like the rest of this
+    /// tracker's state, it resets on app restart.</summary>
+    private readonly Dictionary<(string ProcessName, AnomalyDirection Direction), DateTimeOffset> snoozedUntil = [];
 
     public bool ShouldFire(string processName, AnomalyDirection direction, bool isAnomalousNow, DateTimeOffset now)
     {
@@ -16,7 +20,15 @@ public sealed class AnomalyTracker(TimeSpan minimumSustained, TimeSpan cooldown)
         if (!state.TryGetValue(key, out var entry)) { state[key] = (now, null); return false; }
         bool sustained = now - entry.FirstAnomalousAt >= minimumSustained;
         bool cooledDown = entry.LastAlertAt is null || now - entry.LastAlertAt >= cooldown;
-        if (sustained && cooledDown) { state[key] = (entry.FirstAnomalousAt, now); return true; }
+        bool snoozed = snoozedUntil.TryGetValue(key, out var until) && now < until;
+        // A snoozed firing doesn't update LastAlertAt — no alert happened — so the moment the snooze lapses,
+        // an already-sustained anomaly can fire immediately rather than needing to re-satisfy the cooldown too.
+        if (sustained && cooledDown && !snoozed) { state[key] = (entry.FirstAnomalousAt, now); return true; }
         return false;
     }
+
+    /// <summary>Suppresses firing for this (process, direction) until <paramref name="until"/>, without affecting
+    /// the sustained-duration timer or automatic cooldown, and without excluding the app from detection entirely
+    /// (that's <c>AppSettings.TrustedApplications</c>, a separate, persisted mechanism).</summary>
+    public void Snooze(string processName, AnomalyDirection direction, DateTimeOffset until) => snoozedUntil[(processName, direction)] = until;
 }

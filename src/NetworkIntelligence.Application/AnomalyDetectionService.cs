@@ -19,6 +19,13 @@ public sealed class AnomalyDetectionService(IHistoryStore store, ILogger<Anomaly
     private AppSettings settings = new();
     public event Action<AnomalyEvent>? Anomaly;
     public void UpdateSettings(AppSettings value) => settings = value;
+    /// <summary>Suppresses further firing for this (process, direction) until <paramref name="duration"/> has
+    /// elapsed (section 10.6's "snooze," distinct from "dismiss" — a UI-only, view-level action — and from
+    /// trusting an app permanently). Silently ignores an unrecognized direction string.</summary>
+    public void Snooze(string processName, string direction, TimeSpan duration)
+    {
+        if (Enum.TryParse<AnomalyDirection>(direction, out var parsed)) tracker.Snooze(processName, parsed, DateTimeOffset.UtcNow + duration);
+    }
 
     public async Task IngestAsync(ServiceSnapshot snapshot, CancellationToken token)
     {

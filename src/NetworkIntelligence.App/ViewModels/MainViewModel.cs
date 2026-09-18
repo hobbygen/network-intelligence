@@ -22,7 +22,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<string> Events { get; } = [];
     public ObservableCollection<string> Usage { get; } = [];
     public ObservableCollection<string> AppUsage { get; } = [];
-    public ObservableCollection<string> RecentAlerts { get; } = [];
+    public ObservableCollection<AlertDisplay> RecentAlerts { get; } = [];
     public ObservableCollection<double?> Downloads { get; } = [];
     public ObservableCollection<double?> Uploads { get; } = [];
     public ISeries[] Series { get; }
@@ -103,10 +103,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
     public void AddAlert(AnomalyEvent anomaly)
     {
-        string arrow = anomaly.Direction == "Download" ? "↓" : "↑";
-        RecentAlerts.Insert(0, $"{anomaly.Timestamp.ToLocalTime():g}   {anomaly.Severity}   {anomaly.ProcessName}   {arrow} {FormatRate(anomaly.CurrentBytesPerSecond)}\n{anomaly.Explanation}");
+        RecentAlerts.Insert(0, new AlertDisplay(anomaly));
         while (RecentAlerts.Count > 50) RecentAlerts.RemoveAt(RecentAlerts.Count - 1);
     }
+    /// <summary>View-only removal (requirements section 10.6's "dismiss") — the persisted <see
+    /// cref="AnomalyEvent"/> row and its evidence are untouched; only this session's Dashboard list changes.</summary>
+    public void RemoveAlert(AlertDisplay alert) => RecentAlerts.Remove(alert);
     public void ClearSession() { session.Clear(); Downloads.Clear(); Uploads.Clear(); NotifyMetrics(); }
     private void NotifyMetrics()
     { foreach (var name in new[] { nameof(Download), nameof(Upload), nameof(Connection), nameof(LinkSpeed), nameof(AdapterName), nameof(AdapterDescription), nameof(SessionUsage), nameof(MeasurementDetail), nameof(Gateway), nameof(CounterDetail), nameof(AddressDetail) }) Changed(name); }
@@ -136,4 +138,10 @@ public sealed record AppTrafficDisplay(ApplicationTrafficSample Value)
     public string Name => Value.ProcessName;
     public string Summary => $"PID {Value.Pid} · ↓ {MainViewModel.FormatRate(Value.ReceivedBytesPerSecond)} · ↑ {MainViewModel.FormatRate(Value.SentBytesPerSecond)}";
     public string Detail => $"Window total: ↓ {MainViewModel.Bytes(Value.ReceivedBytesTotal)}  ↑ {MainViewModel.Bytes(Value.SentBytesTotal)} · {Value.Events} events · {Value.WindowStart.ToLocalTime():T}–{Value.WindowEnd.ToLocalTime():T}";
+}
+public sealed record AlertDisplay(AnomalyEvent Value)
+{
+    public string Title => $"{Value.Timestamp.ToLocalTime():g}   {Value.Severity}   {Value.ProcessName}";
+    public string Summary => $"{(Value.Direction == "Download" ? "↓" : "↑")} {MainViewModel.FormatRate(Value.CurrentBytesPerSecond)} vs. baseline {MainViewModel.FormatRate(Value.BaselineMeanBytesPerSecond)}";
+    public string Detail => Value.Explanation;
 }

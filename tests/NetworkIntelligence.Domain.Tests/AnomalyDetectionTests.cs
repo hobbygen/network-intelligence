@@ -155,4 +155,26 @@ public class AnomalyTrackerTests
         Assert.False(tracker.ShouldFire("b", AnomalyDirection.Download, true, Start.AddSeconds(31)));
         Assert.True(tracker.ShouldFire("a", AnomalyDirection.Download, true, Start.AddSeconds(31)));
     }
+    [Fact] public void SnoozeSuppressesFiringUntilItLapsesThenFiresImmediately()
+    {
+        var tracker = new AnomalyTracker(TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(15));
+        tracker.Snooze("x", AnomalyDirection.Download, Start.AddHours(1));
+        Assert.False(tracker.ShouldFire("x", AnomalyDirection.Download, true, Start)); // first sighting
+        Assert.False(tracker.ShouldFire("x", AnomalyDirection.Download, true, Start.AddSeconds(31))); // sustained+cooled down, but snoozed
+        Assert.False(tracker.ShouldFire("x", AnomalyDirection.Download, true, Start.AddMinutes(59))); // still snoozed
+        // Snooze lapsed: fires immediately — a suppressed firing doesn't reset the sustained timer or start a
+        // phantom cooldown, so the anomaly doesn't need to re-accumulate 30s once it's visible again.
+        Assert.True(tracker.ShouldFire("x", AnomalyDirection.Download, true, Start.AddHours(1).AddSeconds(1)));
+    }
+    [Fact] public void SnoozeIsPerProcessAndDirection()
+    {
+        var tracker = new AnomalyTracker(TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(15));
+        tracker.Snooze("x", AnomalyDirection.Download, Start.AddHours(1));
+        tracker.ShouldFire("x", AnomalyDirection.Download, true, Start);
+        tracker.ShouldFire("x", AnomalyDirection.Upload, true, Start);
+        tracker.ShouldFire("y", AnomalyDirection.Download, true, Start);
+        Assert.False(tracker.ShouldFire("x", AnomalyDirection.Download, true, Start.AddSeconds(31))); // snoozed
+        Assert.True(tracker.ShouldFire("x", AnomalyDirection.Upload, true, Start.AddSeconds(31))); // different direction
+        Assert.True(tracker.ShouldFire("y", AnomalyDirection.Download, true, Start.AddSeconds(31))); // different process
+    }
 }
