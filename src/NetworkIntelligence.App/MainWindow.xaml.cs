@@ -243,6 +243,7 @@ public sealed partial class MainWindow : Window
         {
             var result = await diagnostics.RunAsync(DiagnosticTarget.Text.Trim(), diagnosticCancellation.Token);
             lastDiagnostic = result;
+            ViewModel.SetDiagnostic(result);
             string Ms(double? value) => value is null ? "Unavailable" : $"{value:0.0} ms";
             ViewModel.DiagnosticText = $"{result.Timestamp.ToLocalTime():g} · {result.Target}\n{result.Status}\nDNS {Ms(result.DnsMilliseconds)} · Average {Ms(result.AverageMilliseconds)}\nMinimum {Ms(result.MinMilliseconds)} · Maximum {Ms(result.MaxMilliseconds)}\nJitter {Ms(result.JitterMilliseconds)} · ICMP nonresponses {(result.LossPercent is null ? "Unavailable" : result.LossPercent + "%")}\n{result.Replies}/{result.Attempts} replies · {result.LocalErrors} local errors\n\n{result.Detail}";
             // The target is user supplied; persist only when address collection is enabled.

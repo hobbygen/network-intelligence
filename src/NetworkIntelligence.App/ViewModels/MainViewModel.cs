@@ -5,6 +5,7 @@ using LiveChartsCore;
 using LiveChartsCore.SkiaSharpView;
 using LiveChartsCore.SkiaSharpView.Painting;
 using NetworkIntelligence.Contracts;
+using NetworkIntelligence.Domain;
 using SkiaSharp;
 namespace NetworkIntelligence.App.ViewModels;
 
@@ -32,6 +33,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly Dictionary<string, (long Down, long Up)> session = [];
     private MonitoringSnapshot? latest;
     private ServiceSnapshot appTraffic = ServiceSnapshot.Unavailable("Not checked yet.");
+    private readonly List<ConnectionEvent> connectionEvents = [];
+    private DiagnosticResult? lastDiagnostic;
+    public NetworkHealthScore Health { get; private set; } = NetworkHealthScore.Insufficient("Waiting for the first adapter measurement.");
+    public string HealthScoreText => Health.Score?.ToString() ?? "—";
+    public string HealthBandText => Health.Band ?? "Insufficient data";
     public IReadOnlyList<ProcessConnections> Processes => latest?.Applications ?? [];
     public AdapterSnapshot? Selected
     {
@@ -82,6 +88,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         Wifi.Clear(); foreach (var item in snapshot.Wifi) Wifi.Add(new(item));
         if (snapshot.Error is not null) Status = snapshot.Error;
         Changed(nameof(LastUpdated));
+        RecomputeHealth();
     }
     public void ApplyApplicationTraffic(ServiceSnapshot snapshot)
     {
@@ -98,8 +105,32 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
     public void AddEvents(IReadOnlyList<ConnectionEvent> events)
     {
-        foreach (var item in events) Events.Insert(0, $"{item.Timestamp.ToLocalTime():g}   {item.AdapterName}   {item.PreviousState} → {item.State}");
+        foreach (var item in events)
+        {
+            Events.Insert(0, $"{item.Timestamp.ToLocalTime():g}   {item.AdapterName}   {item.PreviousState} → {item.State}");
+            connectionEvents.Insert(0, item);
+        }
         while (Events.Count > 200) Events.RemoveAt(Events.Count - 1);
+        while (connectionEvents.Count > 200) connectionEvents.RemoveAt(connectionEvents.Count - 1);
+        RecomputeHealth();
+    }
+    /// <summary>Feeds the health score's latency/loss/jitter/DNS factors (requirements section 12.4) — diagnostics
+    /// are only ever user-initiated (see MainWindow.DiagnosticsClicked), so this is the one place that data enters
+    /// the ViewModel; <see cref="HealthScoreCalculator"/> itself decides when a result is too stale to use.</summary>
+    public void SetDiagnostic(DiagnosticResult? result) { lastDiagnostic = result; RecomputeHealth(); }
+    private void RecomputeHealth()
+    {
+        // WLAN interface GUIDs come back wrapped in braces (WifiReader's id.ToString("B")); NetworkInterface.Id
+        // (AdapterSnapshot.Id, used everywhere else) does not have them — strip both before comparing.
+        static string NormalizeId(string id) => id.Trim('{', '}');
+        var wifi = selected is null ? null : Wifi.FirstOrDefault(w => string.Equals(NormalizeId(w.Value.AdapterId), NormalizeId(selected.Id), StringComparison.OrdinalIgnoreCase));
+        var disconnects = connectionEvents
+            .Where(e => e.AdapterId == selected?.Id && e.PreviousState == "Up" && e.State != "Up")
+            .Select(e => e.Timestamp).ToArray();
+        Health = HealthScoreCalculator.Compute(DateTimeOffset.UtcNow, selected is not null, selected?.State == "Up", selected?.HasGateway ?? false,
+            lastDiagnostic?.AverageMilliseconds, lastDiagnostic?.LossPercent, lastDiagnostic?.JitterMilliseconds, lastDiagnostic?.DnsMilliseconds, lastDiagnostic?.Timestamp,
+            wifi is not null, wifi?.Value.SignalPercent, selected?.Errors, selected?.Discards, disconnects);
+        Changed(nameof(Health)); Changed(nameof(HealthScoreText)); Changed(nameof(HealthBandText));
     }
     public void AddAlert(AnomalyEvent anomaly)
     {
@@ -109,7 +140,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     /// <summary>View-only removal (requirements section 10.6's "dismiss") — the persisted <see
     /// cref="AnomalyEvent"/> row and its evidence are untouched; only this session's Dashboard list changes.</summary>
     public void RemoveAlert(AlertDisplay alert) => RecentAlerts.Remove(alert);
-    public void ClearSession() { session.Clear(); Downloads.Clear(); Uploads.Clear(); NotifyMetrics(); }
+    public void ClearSession() { session.Clear(); Downloads.Clear(); Uploads.Clear(); connectionEvents.Clear(); NotifyMetrics(); RecomputeHealth(); }
     private void NotifyMetrics()
     { foreach (var name in new[] { nameof(Download), nameof(Upload), nameof(Connection), nameof(LinkSpeed), nameof(AdapterName), nameof(AdapterDescription), nameof(SessionUsage), nameof(MeasurementDetail), nameof(Gateway), nameof(CounterDetail), nameof(AddressDetail) }) Changed(name); }
     public static string FormatRate(double? bytes) => bytes is null ? "Unavailable" : bytes < 125_000 ? $"{bytes * 8 / 1_000:0.0} Kbps" : $"{bytes * 8 / 1_000_000:0.00} Mbps";
