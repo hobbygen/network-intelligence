@@ -99,7 +99,8 @@
         <ToggleSwitch x:Name="AnomalyEnabled" Header="Detect unusual application bandwidth" IsOn="True"/>
         <NumberBox x:Name="AnomalySensitivity" Header="Sensitivity (standard deviations; lower is more sensitive)" Minimum="1.5" Maximum="6.0" SmallChange="0.5" Value="3.0" SpinButtonPlacementMode="Inline" Width="280" HorizontalAlignment="Left"/>
         <TextBlock Text="Trusted applications (excluded from detection):" Style="{StaticResource Caption}"/>
-        <TextBlock x:Name="TrustedApplicationsText" TextWrapping="Wrap"/>
+        <TextBlock x:Name="NoTrustedApplicationsText" Text="None yet — use &quot;Trust this app&quot; on the Application usage page." TextWrapping="Wrap"/>
+        <ItemsControl x:Name="TrustedApplicationsList"><ItemsControl.ItemTemplate><DataTemplate><Grid ColumnSpacing="12" Margin="0,0,0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding}" VerticalAlignment="Center"/><Button Grid.Column="1" Content="Untrust" Click="UntrustApplication"/></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
        </StackPanel></Border>
        <StackPanel Orientation="Horizontal" Spacing="12"><Button Content="Save settings" Click="SaveSettings"/><Button Content="Delete stored history…" Click="DeleteHistory"/></StackPanel><TextBlock x:Name="StoragePath" TextWrapping="Wrap" Style="{StaticResource Caption}"/>
       </StackPanel>

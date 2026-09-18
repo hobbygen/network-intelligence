@@ -117,7 +117,8 @@ public sealed partial class MainWindow : Window
         QuietStart.Value = settings.QuietStartHour; QuietEnd.Value = settings.QuietEndHour;
         DiagnosticTarget.Text = settings.DiagnosticTarget;
         AnomalyEnabled.IsOn = settings.AnomalyDetectionEnabled; AnomalySensitivity.Value = settings.AnomalySensitivity;
-        TrustedApplicationsText.Text = settings.TrustedApplications.Length == 0 ? "None yet — use \"Trust this app\" on the Application usage page." : string.Join(", ", settings.TrustedApplications);
+        NoTrustedApplicationsText.Visibility = settings.TrustedApplications.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        TrustedApplicationsList.ItemsSource = settings.TrustedApplications;
     }
     private async void TrustApplication(object sender, RoutedEventArgs e)
     {
@@ -131,6 +132,21 @@ public sealed partial class MainWindow : Window
             ViewModel.Status = $"{app.Name} marked trusted — excluded from anomaly detection.";
         }
         catch (Exception ex) { ViewModel.Status = "Could not save trust setting: " + ex.Message; }
+    }
+    private async void UntrustApplication(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: string name }) return;
+        try
+        {
+            var settings = monitoring.Settings with
+            {
+                TrustedApplications = [.. monitoring.Settings.TrustedApplications.Where(a => !string.Equals(a, name, StringComparison.OrdinalIgnoreCase))]
+            };
+            settings.Validate(); await Task.Run(() => store.SaveSettingsAsync(settings, CancellationToken.None));
+            monitoring.UpdateSettings(settings); anomalyDetection.UpdateSettings(settings); ApplySettings(settings);
+            ViewModel.Status = $"{name} untrusted — eligible for anomaly detection again.";
+        }
+        catch (Exception ex) { ViewModel.Status = "Could not remove trust setting: " + ex.Message; }
     }
     private void NavigationChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
