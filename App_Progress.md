@@ -1,14 +1,14 @@
 # Network Intelligence — Progress Snapshot
 
-**As of:** 2026-09-19 · **Branch:** master · **Last commit:** `136e06a` "Add one-click speed testing, usage reports, and speed-test history"
-**Working tree:** adds a dedicated, browsable/filterable alert history page (ADR-017); not yet committed.
-**Version:** 0.2.0 early access · **Tests:** 132/132 passing (`tests/NetworkIntelligence.Domain.Tests`) · **Build:** clean (`dotnet build NetworkIntelligence.slnx`)
-**Package:** existing portable ZIP has not been rebuilt with the latest speed-test, usage-report and alert-history changes.
+**As of:** 2026-09-19 · **Branch:** master (pushed to `origin` at github.com/hobbygen/network-intelligence) · **Last commit:** `11fb2bc` "Add a dedicated, browsable alert history page"
+**Working tree:** fixes pid reuse within one ETW collection window (ADR-018); not yet committed.
+**Version:** 0.2.0 early access · **Tests:** 138/138 passing (`tests/NetworkIntelligence.Domain.Tests`) · **Build:** clean (`dotnet build NetworkIntelligence.slnx`)
+**Package:** existing portable ZIP has not been rebuilt with the latest speed-test, usage-report, alert-history and identity-fix changes.
 
 This file is a fast-orientation snapshot for picking the work back up. It does not replace the detailed records —
 when you need the *why* behind something, go to the source of truth:
 
-- **`docs/DECISIONS.md`** — every architecture/feature decision as a numbered ADR (ADR-001 through ADR-017), each
+- **`docs/DECISIONS.md`** — every architecture/feature decision as a numbered ADR (ADR-001 through ADR-018), each
   with rationale, what was validated, and known caveats. Always check here before assuming something is unbuilt.
 - **`CHANGELOG.md`** — chronological, more implementation-detail-heavy than the ADRs.
 - **`docs/TEST_REPORT.md`** — what's been tested/verified and, critically, its "Remaining acceptance work" section
@@ -70,13 +70,17 @@ checked using isolated synthetic data; database integrity was `ok`. Local eviden
 `artifacts/report-ui-yearly-final/smoke-preview.png`. Native export-picker interaction, keyboard/screen-reader
 behavior and long-duration/high-volume report performance remain unverified.
 
-### Application monitoring (Phase 6, ADR-007–010, ADR-012)
+### Application monitoring (Phase 6, ADR-007–010, ADR-012, ADR-018)
 Elevated `MonitoringService` (Generic Host worker, named-pipe IPC, least-privilege) does real per-process TCP/UDP
 byte attribution via kernel ETW. Process names are resolved from kernel `ProcessStart`/`ProcessDCStart` events
 (not a post-exit lookup) — this was the fix in ADR-012, live-validated against 15 concurrent short-lived
-processes. Per-app traffic persists as minute aggregates (schema v2) with its own export.
-**Still not a fully stable identity**: grouping is by process name only; two different process instances sharing
-a PID within the same 5-second window still merge (documented, accepted limitation).
+processes. Per-app traffic persists as minute aggregates (schema v2) with its own export. **A PID reused by a
+different process within the same 5-second window no longer merges into one sample** (ADR-018): a new pure
+`ProcessTrafficAccumulator` (Domain, 6 new unit tests — the only rigorous way to verify this, since real pid
+reuse timing can't be forced live) splits traffic at the process-start event that signals the handoff.
+**Still not a fully stable identity**: grouping is by process name only, so two different applications that
+happen to share a process name still aren't distinguished (would need executable-path identity — bigger change,
+deferred; documented, accepted limitation).
 
 ### Anomaly detection (Phase 7, ADR-011 + 4 follow-ups)
 Full detection pipeline per spec section 10.5: `BaselineCalculator` (Welford + outlier trim) and
@@ -115,10 +119,11 @@ The following work remains; release acceptance items still limit production read
    weights/curves both need days-to-weeks of live, varied usage data to validate against — tracked as explicitly
    outstanding in ADR-011/ADR-013 and `docs/VALIDATION_PLAN.md`. Nothing to build here yet; needs actual usage
    history first (or a plan for how to gather it).
-2. **Stable application identity beyond process-name grouping.** ADR-012 fixed the specific short-lived-process
-   name-loss bug but deliberately didn't take on full stable identity (executable path, PID-reuse
-   disambiguation within a single window). Flagged as the natural next step if it turns out to matter in
-   practice.
+2. **Full executable-path application identity.** ADR-012 fixed short-lived-process name loss and ADR-018 fixed
+   PID reuse within a single collection window; two different applications that happen to share a process name
+   still aren't distinguished. Bigger change (schema/storage/export/UI/baseline surface) — deferred; the user
+   deliberately chose the narrower ADR-018 scope over this when picking the last "stable identity" item, so
+   pick this back up only if it turns out to matter in practice.
 3. **Speed-test follow-ups (optional)** — additional supported providers or adaptive line-capacity estimation;
    automatic selection of the built-in provider (ADR-014) and persisted result history (ADR-016) are implemented.
 4. **`docs/TEST_REPORT.md`'s "Remaining acceptance work" list** — the authoritative, longer catalog: controlled
@@ -127,7 +132,7 @@ The following work remains; release acceptance items still limit production read
    10 + clean Windows 11 install testing, UI automation/accessibility coverage, long-duration/high-throughput
    benchmarks, and signed release packaging (MSIX or installer — currently an unsigned portable build only).
 5. **Phase 8/9 polish**: accessibility pass, localization-ready strings audit, and a real automated
-   integration/UI test harness (current coverage is 132 automated tests across Domain/Application/Infrastructure plus a lot of manual/live
+   integration/UI test harness (current coverage is 138 automated tests across Domain/Application/Infrastructure plus a lot of manual/live
    verification — solid for what it covers, but nothing exercises the full stack end-to-end automatically).
 6. **Usage-report acceptance and packaging**: verify the native save picker and keyboard/screen-reader flows,
    benchmark large retained histories, then rebuild and verify the portable package when preparing a release.

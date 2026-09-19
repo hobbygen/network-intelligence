@@ -6,6 +6,7 @@ using Microsoft.Diagnostics.Tracing.Session;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NetworkIntelligence.Contracts;
+using NetworkIntelligence.Domain;
 namespace NetworkIntelligence.MonitoringService;
 
 /// <summary>
@@ -17,6 +18,10 @@ namespace NetworkIntelligence.MonitoringService;
 /// name of any process that had already exited within the up-to-5-second window, which fell back to a PID-embedded
 /// placeholder that never matched across restarts, so restart-prone short-lived processes could never accumulate
 /// enough same-name history to leave the anomaly baseline's "insufficient history" state (docs/DECISIONS.md ADR-011).
+/// Traffic accumulation is delegated to <see cref="ProcessTrafficAccumulator"/> (pure, in NetworkIntelligence.Domain)
+/// specifically so the "pid reused by a different process inside one window" case — the one gap ADR-012 left open —
+/// splits the traffic at the handoff instead of merging it under whichever name is current at flush time
+/// (docs/DECISIONS.md ADR-018).
 /// </summary>
 internal sealed class EtwCollector(ILogger<EtwCollector> logger) : BackgroundService
 {
@@ -54,19 +59,35 @@ internal sealed class EtwCollector(ILogger<EtwCollector> logger) : BackgroundSer
             return;
         }
 
-        var window = new ConcurrentDictionary<int, WindowAccumulator>();
-        void Attribute(int pid, int size, bool isSend) => window.AddOrUpdate(pid,
-            _ => isSend ? new WindowAccumulator(0, size, 1) : new WindowAccumulator(size, 0, 1),
-            (_, existing) => isSend
-                ? existing with { Sent = existing.Sent + size, Events = existing.Events + 1 }
-                : existing with { Received = existing.Received + size, Events = existing.Events + 1 });
+        // Guards both trafficAccumulator and pendingCarryOver: the ETW processing thread (a single dedicated
+        // thread — TraceEventSession.Process() dispatches every kernel callback from it, so RecordStart/RecordStop/
+        // Attribute never race each other) writes to both; the flush loop below (a different thread) drains them.
+        var trafficLock = new object();
+        var trafficAccumulator = new ProcessTrafficAccumulator();
+        var pendingCarryOver = new List<(int Pid, string Name, ProcessTrafficAccumulator.Sample Sample)>();
+        void Attribute(int pid, int size, bool isSend) { lock (trafficLock) trafficAccumulator.RecordTraffic(pid, size, isSend); }
 
         // Populated from process start/rundown events, not a live lookup at flush time — see class summary.
         // ProcessDCStart is the rundown of processes already running when the session starts; ProcessDCStop (the
         // mirror rundown at session end) is deliberately not subscribed — it only fires during session.Stop() in
         // the finally block below, after the flush loop has already exited, so it could never be observed.
         var processNames = new ConcurrentDictionary<int, ProcessNameEntry>();
-        void RecordStart(ProcessTraceData d) => processNames[d.ProcessID] = new ProcessNameEntry(ResolveImageName(d), null);
+        void RecordStart(ProcessTraceData d)
+        {
+            int pid = d.ProcessID;
+            string newName = ResolveImageName(d);
+            // A prior entry for this pid means this is not its first-ever identity — i.e. the OS just handed the
+            // pid to a new process. Detach whatever traffic is still pending under the OLD identity before it is
+            // overwritten below, so it is never silently merged into the new process's sample (docs/DECISIONS.md
+            // ADR-018). Returns null (no-op) when nothing was pending, the common case.
+            if (processNames.TryGetValue(pid, out var previous))
+                lock (trafficLock)
+                {
+                    var carried = trafficAccumulator.SplitOnIdentityChange(pid);
+                    if (carried is { } sample) pendingCarryOver.Add((pid, previous.Name, sample));
+                }
+            processNames[pid] = new ProcessNameEntry(newName, null);
+        }
         void RecordStop(ProcessTraceData d) => processNames.AddOrUpdate(d.ProcessID,
             _ => new ProcessNameEntry(ResolveImageName(d), DateTimeOffset.UtcNow),
             (_, existing) => existing with { StoppedAt = DateTimeOffset.UtcNow });
@@ -97,13 +118,21 @@ internal sealed class EtwCollector(ILogger<EtwCollector> logger) : BackgroundSer
             {
                 var windowEnd = DateTimeOffset.UtcNow;
                 var windowStart = windowEnd - WindowDuration;
-                var keys = window.Keys.ToArray();
-                var samples = new List<ApplicationTrafficSample>(keys.Length);
-                foreach (var pid in keys)
+                IReadOnlyList<ProcessTrafficAccumulator.Sample> liveSamples;
+                List<(int Pid, string Name, ProcessTrafficAccumulator.Sample Sample)> carryOver;
+                lock (trafficLock)
                 {
-                    if (!window.TryRemove(pid, out var totals)) continue;
-                    samples.Add(ToSample(pid, ResolveName(pid, processNames), totals, windowStart, windowEnd));
+                    liveSamples = trafficAccumulator.Flush();
+                    carryOver = [.. pendingCarryOver];
+                    pendingCarryOver.Clear();
                 }
+                var samples = new List<ApplicationTrafficSample>(liveSamples.Count + carryOver.Count);
+                foreach (var s in liveSamples)
+                    samples.Add(ToSample(s.Pid, ResolveName(s.Pid, processNames), new WindowAccumulator(s.ReceivedBytes, s.SentBytes, s.Events), windowStart, windowEnd));
+                // A carry-over fragment already has its identity resolved at the moment of the handoff (see
+                // RecordStart) — it must not be re-resolved via processNames, which by now holds the NEW identity.
+                foreach (var (pid, name, sample) in carryOver)
+                    samples.Add(ToSample(pid, name, new WindowAccumulator(sample.ReceivedBytes, sample.SentBytes, sample.Events), windowStart, windowEnd));
                 var cutoff = windowEnd - StoppedProcessNameRetention;
                 foreach (var (pid, entry) in processNames)
                 {
@@ -113,7 +142,7 @@ internal sealed class EtwCollector(ILogger<EtwCollector> logger) : BackgroundSer
                 latest = new ServiceSnapshot(windowEnd, WindowDuration, lost,
                     samples.OrderByDescending(s => s.ReceivedBytesTotal + s.SentBytesTotal).Take(ServiceProtocol.MaxProcesses).ToArray(),
                     "Measured",
-                    "Kernel network provider window; PID reuse across windows is not de-duplicated; adapter identity is not attributed to events.");
+                    "Kernel network provider window; a pid handed off to a new process mid-window is split by identity, not merged; process name (not executable path) is still the only identity signal; adapter identity is not attributed to events.");
             }
         }
         catch (OperationCanceledException) { }
