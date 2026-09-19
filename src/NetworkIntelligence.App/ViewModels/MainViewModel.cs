@@ -25,6 +25,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<string> AppUsage { get; } = [];
     public ObservableCollection<string> SpeedTests { get; } = [];
     public ObservableCollection<AlertDisplay> RecentAlerts { get; } = [];
+    public ObservableCollection<AlertDisplay> AlertHistory { get; } = [];
     public ObservableCollection<double?> Downloads { get; } = [];
     public ObservableCollection<double?> Uploads { get; } = [];
     public ISeries[] Series { get; }
@@ -36,6 +37,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private ServiceSnapshot appTraffic = ServiceSnapshot.Unavailable("Not checked yet.");
     private readonly List<ConnectionEvent> connectionEvents = [];
     private DiagnosticResult? lastDiagnostic;
+    private IReadOnlyList<AnomalyEvent> alertHistoryFull = [];
+    private string alertHistorySearch = "";
+    private string alertHistorySeverity = "All";
+    private string alertHistoryDirection = "All";
     public NetworkHealthScore Health { get; private set; } = NetworkHealthScore.Insufficient("Waiting for the first adapter measurement.");
     public string HealthScoreText => Health.Score?.ToString() ?? "—";
     public string HealthBandText => Health.Band ?? "Insufficient data";
@@ -141,6 +146,27 @@ public sealed class MainViewModel : INotifyPropertyChanged
     /// <summary>View-only removal (requirements section 10.6's "dismiss") — the persisted <see
     /// cref="AnomalyEvent"/> row and its evidence are untouched; only this session's Dashboard list changes.</summary>
     public void RemoveAlert(AlertDisplay alert) => RecentAlerts.Remove(alert);
+    /// <summary>A separate, browsable/filterable archive from <see cref="RecentAlerts"/> (the Dashboard's
+    /// live, capped-at-50, session-actionable card) — this reflects the full stored <c>AnomalyEvents</c> table
+    /// (up to whatever limit the caller queried) and is unaffected by Snooze/Dismiss on the Dashboard card,
+    /// since both are view-only there and never touch the underlying rows anyway.</summary>
+    public string AlertHistoryStatus => alertHistoryFull.Count == 0 ? "No anomaly alerts recorded yet." : $"Showing {AlertHistory.Count} of {alertHistoryFull.Count} stored alerts.";
+    public void SetAlertHistory(IReadOnlyList<AnomalyEvent> events) { alertHistoryFull = events; ApplyAlertHistoryFilter(); }
+    public void FilterAlertHistory(string search, string severity, string direction)
+    {
+        alertHistorySearch = search; alertHistorySeverity = severity; alertHistoryDirection = direction;
+        ApplyAlertHistoryFilter();
+    }
+    private void ApplyAlertHistoryFilter()
+    {
+        AlertHistory.Clear();
+        foreach (var row in alertHistoryFull
+            .Where(a => alertHistorySearch.Length == 0 || a.ProcessName.Contains(alertHistorySearch, StringComparison.OrdinalIgnoreCase))
+            .Where(a => alertHistorySeverity == "All" || a.Severity == alertHistorySeverity)
+            .Where(a => alertHistoryDirection == "All" || a.Direction == alertHistoryDirection))
+            AlertHistory.Add(new(row));
+        Changed(nameof(AlertHistoryStatus));
+    }
     public void ClearSession() { session.Clear(); Downloads.Clear(); Uploads.Clear(); connectionEvents.Clear(); NotifyMetrics(); RecomputeHealth(); }
     private void NotifyMetrics()
     { foreach (var name in new[] { nameof(Download), nameof(Upload), nameof(Connection), nameof(LinkSpeed), nameof(AdapterName), nameof(AdapterDescription), nameof(SessionUsage), nameof(MeasurementDetail), nameof(Gateway), nameof(CounterDetail), nameof(AddressDetail) }) Changed(name); }

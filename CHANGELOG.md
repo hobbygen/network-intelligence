@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a dedicated, browsable/filterable alert history page (`docs/DECISIONS.md` ADR-017): a new "Alert history" nav item lists up to the last 200 stored `AnomalyEvent` rows (newest first), independent of the Dashboard's live, capped-at-50 "Recent alerts" card, with process-name search, severity and direction filters (all client-side, view-only) and a manual refresh. No schema change — reuses the existing `AnomalyEvents` table and `GetAnomalyEventsAsync`. Wired into history deletion (previously the delete-history dialog didn't mention it, though the table was already cleared).
+
 - Persist completed speed-test runs, database schema version 4 (`docs/DECISIONS.md` ADR-016): a new `SpeedTests` table (JSON rows, following the `Diagnostics` table's pattern) stores timestamp, endpoint and every result metric for a run that finishes successfully — cancelled, failed or timed-out runs are never written, matching `TransferTest`'s own "incomplete results are discarded" contract. Network performance gained a "Recent speed tests" card showing the last 10 runs, reloaded on startup, on history refresh, and immediately after a new run completes. Wired into the existing retention/deletion paths alongside adapter, diagnostic, application and anomaly history. 3 new tests (132 total).
 
 - Finish usage reports on Bandwidth and data: daily, Monday-based weekly, monthly, yearly and custom calendar ranges, daily charts and coverage, separate adapter totals, top applications across all interfaces, and snapshot-consistent CSV/JSON export. Missing measurements remain unavailable; overlapping coverage is flagged. Add the yearly preset and year-boundary/leap-year/history-deletion tests. See ADR-015.

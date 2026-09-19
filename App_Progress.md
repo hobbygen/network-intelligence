@@ -1,14 +1,14 @@
 # Network Intelligence — Progress Snapshot
 
-**As of:** 2026-09-19 · **Branch:** master · **Last commit:** `be09b35` "Add App_Progress.md as a fast-orientation status snapshot"
-**Working tree:** adds one-click speed testing (ADR-014), usage reports (ADR-015) and persisted speed-test history (ADR-016); not yet committed.
+**As of:** 2026-09-19 · **Branch:** master · **Last commit:** `136e06a` "Add one-click speed testing, usage reports, and speed-test history"
+**Working tree:** adds a dedicated, browsable/filterable alert history page (ADR-017); not yet committed.
 **Version:** 0.2.0 early access · **Tests:** 132/132 passing (`tests/NetworkIntelligence.Domain.Tests`) · **Build:** clean (`dotnet build NetworkIntelligence.slnx`)
-**Package:** existing portable ZIP has not been rebuilt with the latest speed-test and usage-report changes.
+**Package:** existing portable ZIP has not been rebuilt with the latest speed-test, usage-report and alert-history changes.
 
 This file is a fast-orientation snapshot for picking the work back up. It does not replace the detailed records —
 when you need the *why* behind something, go to the source of truth:
 
-- **`docs/DECISIONS.md`** — every architecture/feature decision as a numbered ADR (ADR-001 through ADR-016), each
+- **`docs/DECISIONS.md`** — every architecture/feature decision as a numbered ADR (ADR-001 through ADR-017), each
   with rationale, what was validated, and known caveats. Always check here before assuming something is unbuilt.
 - **`CHANGELOG.md`** — chronological, more implementation-detail-heavy than the ADRs.
 - **`docs/TEST_REPORT.md`** — what's been tested/verified and, critically, its "Remaining acceptance work" section
@@ -78,14 +78,16 @@ processes. Per-app traffic persists as minute aggregates (schema v2) with its ow
 **Still not a fully stable identity**: grouping is by process name only; two different process instances sharing
 a PID within the same 5-second window still merge (documented, accepted limitation).
 
-### Anomaly detection (Phase 7, ADR-011 + 3 follow-ups)
+### Anomaly detection (Phase 7, ADR-011 + 4 follow-ups)
 Full detection pipeline per spec section 10.5: `BaselineCalculator` (Welford + outlier trim) and
 `AnomalyEvaluator` in Domain (pure); `AnomalyTracker` (sustained-duration + cooldown + **snooze**, added later)
 and `AnomalyDetectionService` in Application. Learning period (60 samples/7 days) before any alert; per-direction
 evaluation; trusted-app exclusion (with full **trust AND untrust** UI, untrust added later); quiet hours; tray
 notifications. Dashboard "Recent alerts" card shows persisted history with working **Snooze 1h** and **Dismiss**
-buttons (both view-only — stored evidence is never altered). **Thresholds are a documented provisional first
-pass, not validated against a real false-positive rate.**
+buttons (both view-only — stored evidence is never altered). **A dedicated "Alert history" page is now also
+implemented** (ADR-017): browsable/filterable (process name, severity, direction) over the last 200 stored
+alerts, separate from the Dashboard's live capped card, view-only, no schema change. **Thresholds are a
+documented provisional first pass, not validated against a real false-positive rate.**
 
 ### Network health score (Phase 12.4, ADR-013)
 Built from scratch this cycle — was the one entirely-unbuilt Dashboard element. Pure `HealthScoreCalculator` in
@@ -109,29 +111,25 @@ pass**, not validated against real user-perceived quality.
 
 The following work remains; release acceptance items still limit production readiness:
 
-1. **A dedicated alert-history page.** The Dashboard "Recent alerts" card (capped at 50 rows, persisted, loaded
-   on startup) already covers the spec's literal "alert history" requirement (section 12.6). A separate
-   browsable/filterable page was never explicitly requested and hasn't been built. Worth asking whether it's
-   actually wanted before building it.
-2. **Real-world validation, not more coding**: anomaly-detection false-positive rate and health-score
+1. **Real-world validation, not more coding**: anomaly-detection false-positive rate and health-score
    weights/curves both need days-to-weeks of live, varied usage data to validate against — tracked as explicitly
    outstanding in ADR-011/ADR-013 and `docs/VALIDATION_PLAN.md`. Nothing to build here yet; needs actual usage
    history first (or a plan for how to gather it).
-3. **Stable application identity beyond process-name grouping.** ADR-012 fixed the specific short-lived-process
+2. **Stable application identity beyond process-name grouping.** ADR-012 fixed the specific short-lived-process
    name-loss bug but deliberately didn't take on full stable identity (executable path, PID-reuse
    disambiguation within a single window). Flagged as the natural next step if it turns out to matter in
    practice.
-4. **Speed-test follow-ups (optional)** — additional supported providers or adaptive line-capacity estimation;
+3. **Speed-test follow-ups (optional)** — additional supported providers or adaptive line-capacity estimation;
    automatic selection of the built-in provider (ADR-014) and persisted result history (ADR-016) are implemented.
-5. **`docs/TEST_REPORT.md`'s "Remaining acceptance work" list** — the authoritative, longer catalog: controlled
+4. **`docs/TEST_REPORT.md`'s "Remaining acceptance work" list** — the authoritative, longer catalog: controlled
    byte-accuracy edge cases (concurrent processes, UDP, real adapters), ETW CPU/memory overhead benchmark,
    MonitoringService code signing + dedicated service account, automated unauthorized-IPC-client tests, Windows
    10 + clean Windows 11 install testing, UI automation/accessibility coverage, long-duration/high-throughput
    benchmarks, and signed release packaging (MSIX or installer — currently an unsigned portable build only).
-6. **Phase 8/9 polish**: accessibility pass, localization-ready strings audit, and a real automated
-   integration/UI test harness (current coverage is 129 automated tests across Domain/Application/Infrastructure plus a lot of manual/live
+5. **Phase 8/9 polish**: accessibility pass, localization-ready strings audit, and a real automated
+   integration/UI test harness (current coverage is 132 automated tests across Domain/Application/Infrastructure plus a lot of manual/live
    verification — solid for what it covers, but nothing exercises the full stack end-to-end automatically).
-7. **Usage-report acceptance and packaging**: verify the native save picker and keyboard/screen-reader flows,
+6. **Usage-report acceptance and packaging**: verify the native save picker and keyboard/screen-reader flows,
    benchmark large retained histories, then rebuild and verify the portable package when preparing a release.
    Daily/weekly/monthly/yearly/custom reporting itself is implemented; professional PDF reporting remains deferred.
 

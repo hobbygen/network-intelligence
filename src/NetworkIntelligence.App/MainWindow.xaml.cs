@@ -80,7 +80,9 @@ public sealed partial class MainWindow : Window
             monitoring.UpdateSettings(settings); anomalyDetection.UpdateSettings(settings); ApplySettings(settings);
             await LoadHistoryAsync();
             await InitializeUsageReportsAsync();
-            foreach (var alert in (await Task.Run(() => store.GetAnomalyEventsAsync(50, CancellationToken.None))).Reverse()) ViewModel.AddAlert(alert);
+            var alertRows = await Task.Run(() => store.GetAnomalyEventsAsync(AlertHistoryLimit, CancellationToken.None));
+            foreach (var alert in alertRows.Take(50).Reverse()) ViewModel.AddAlert(alert);
+            ViewModel.SetAlertHistory(alertRows);
             ViewModel.Status = "Monitoring locally · no cloud account required";
         }
         catch (Exception ex) { ViewModel.Status = "Local history unavailable: " + ex.Message; }
@@ -206,11 +208,12 @@ public sealed partial class MainWindow : Window
     private void ShowPage(string page)
     {
         currentPage = page;
-        var pages = new Dictionary<string, FrameworkElement> { ["Dashboard"] = DashboardPage, ["Ethernet"] = EthernetPage, ["Wifi"] = WifiPage, ["Performance"] = PerformancePage, ["Usage"] = UsagePage, ["Applications"] = ApplicationsPage, ["History"] = HistoryPage, ["Diagnostics"] = DiagnosticsPage, ["Settings"] = SettingsPage, ["About"] = AboutPage };
+        var pages = new Dictionary<string, FrameworkElement> { ["Dashboard"] = DashboardPage, ["Ethernet"] = EthernetPage, ["Wifi"] = WifiPage, ["Performance"] = PerformancePage, ["Usage"] = UsagePage, ["Applications"] = ApplicationsPage, ["History"] = HistoryPage, ["Alerts"] = AlertsPage, ["Diagnostics"] = DiagnosticsPage, ["Settings"] = SettingsPage, ["About"] = AboutPage };
         foreach (var item in pages) item.Value.Visibility = item.Key == page ? Visibility.Visible : Visibility.Collapsed;
-        PageTitle.Text = page switch { "Dashboard" => "Network overview", "Wifi" => "Wi-Fi", "Performance" => "Network performance", "Usage" => "Bandwidth and data", "Applications" => "Application usage", "History" => "Connection history", _ => page };
+        PageTitle.Text = page switch { "Dashboard" => "Network overview", "Wifi" => "Wi-Fi", "Performance" => "Network performance", "Usage" => "Bandwidth and data", "Applications" => "Application usage", "History" => "Connection history", "Alerts" => "Alert history", _ => page };
         if (page == "Applications") ViewModel.FilterApplications(ApplicationSearch.Text);
         if (page == "Usage" && reportsReady) _ = RefreshUsageReportAsync();
+        if (page == "Alerts") _ = LoadAlertHistoryAsync();
     }
     private void AdapterChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -419,6 +422,24 @@ public sealed partial class MainWindow : Window
         try { await LoadHistoryAsync(); } catch (Exception ex) { ViewModel.Status = "History unavailable: " + ex.Message; }
     }
     private void HistoryRangeChanged(object sender, SelectionChangedEventArgs e) { if (loaded) RefreshHistory(sender, new()); }
+    private const int AlertHistoryLimit = 200;
+    private async Task LoadAlertHistoryAsync()
+    {
+        var rows = await Task.Run(() => store.GetAnomalyEventsAsync(AlertHistoryLimit, CancellationToken.None));
+        ViewModel.SetAlertHistory(rows);
+    }
+    private async void RefreshAlertHistory(object sender, RoutedEventArgs e)
+    {
+        try { await LoadAlertHistoryAsync(); } catch (Exception ex) { ViewModel.Status = "Alert history unavailable: " + ex.Message; }
+    }
+    private void AlertHistorySearchChanged(object sender, TextChangedEventArgs e) { if (loaded) ApplyAlertHistoryFilterFromControls(); }
+    private void AlertHistoryFilterChanged(object sender, SelectionChangedEventArgs e) { if (loaded) ApplyAlertHistoryFilterFromControls(); }
+    private void ApplyAlertHistoryFilterFromControls()
+    {
+        string severity = (AlertSeverityFilter.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "All";
+        string direction = (AlertDirectionFilter.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "All";
+        ViewModel.FilterAlertHistory(AlertSearchBox.Text, severity, direction);
+    }
     private async void ExportClicked(object sender, RoutedEventArgs e)
     {
         if (currentPage == "Usage" && sender is not Button { Tag: "RawUsage" }) { await ExportUsageReportAsync(); return; }
@@ -471,9 +492,15 @@ public sealed partial class MainWindow : Window
     }
     private async void DeleteHistory(object sender, RoutedEventArgs e)
     {
-        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = "Delete stored history?", Content = "Deletes traffic aggregates, connection events, diagnostics and speed-test history from this local database. Settings are kept. Monitoring continues and will record new history.", PrimaryButtonText = "Delete history", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
+        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = "Delete stored history?", Content = "Deletes traffic aggregates, connection events, diagnostics, speed-test history and anomaly alert history from this local database. Settings are kept. Monitoring continues and will record new history.", PrimaryButtonText = "Delete history", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        try { await Task.Run(() => store.DeleteHistoryAsync(CancellationToken.None)); monitoring.ResetSession(); ViewModel.ClearSession(); await LoadHistoryAsync(); await RefreshUsageReportAsync(); ViewModel.Status = "Stored history deleted."; }
+        try
+        {
+            await Task.Run(() => store.DeleteHistoryAsync(CancellationToken.None));
+            monitoring.ResetSession(); ViewModel.ClearSession(); ViewModel.RecentAlerts.Clear();
+            await LoadHistoryAsync(); await RefreshUsageReportAsync(); await LoadAlertHistoryAsync();
+            ViewModel.Status = "Stored history deleted.";
+        }
         catch (Exception ex) { ViewModel.Status = "Deletion failed: " + ex.Message; }
     }
 }
