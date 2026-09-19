@@ -1,14 +1,14 @@
 # Network Intelligence — Progress Snapshot
 
-**As of:** 2026-09-19 · **Branch:** master (pushed to `origin` at github.com/hobbygen/network-intelligence) · **Last commit:** `11fb2bc` "Add a dedicated, browsable alert history page"
-**Working tree:** fixes pid reuse within one ETW collection window (ADR-018); not yet committed.
+**As of:** 2026-09-19 · **Branch:** master (pushed to `origin` at github.com/hobbygen/network-intelligence) · **Last commit:** `780050f` "Fix pid reuse within one ETW collection window"
+**Working tree:** accessibility pass — contrast fix, missing accessible names, ambiguous list-item labels (ADR-019); not yet committed.
 **Version:** 0.2.0 early access · **Tests:** 138/138 passing (`tests/NetworkIntelligence.Domain.Tests`) · **Build:** clean (`dotnet build NetworkIntelligence.slnx`)
-**Package:** existing portable ZIP has not been rebuilt with the latest speed-test, usage-report, alert-history and identity-fix changes.
+**Package:** existing portable ZIP has not been rebuilt with the latest speed-test, usage-report, identity-fix and accessibility changes.
 
 This file is a fast-orientation snapshot for picking the work back up. It does not replace the detailed records —
 when you need the *why* behind something, go to the source of truth:
 
-- **`docs/DECISIONS.md`** — every architecture/feature decision as a numbered ADR (ADR-001 through ADR-018), each
+- **`docs/DECISIONS.md`** — every architecture/feature decision as a numbered ADR (ADR-001 through ADR-019), each
   with rationale, what was validated, and known caveats. Always check here before assuming something is unbuilt.
 - **`CHANGELOG.md`** — chronological, more implementation-detail-heavy than the ADRs.
 - **`docs/TEST_REPORT.md`** — what's been tested/verified and, critically, its "Remaining acceptance work" section
@@ -129,11 +129,18 @@ The following work remains; release acceptance items still limit production read
 4. **`docs/TEST_REPORT.md`'s "Remaining acceptance work" list** — the authoritative, longer catalog: controlled
    byte-accuracy edge cases (concurrent processes, UDP, real adapters), ETW CPU/memory overhead benchmark,
    MonitoringService code signing + dedicated service account, automated unauthorized-IPC-client tests, Windows
-   10 + clean Windows 11 install testing, UI automation/accessibility coverage, long-duration/high-throughput
-   benchmarks, and signed release packaging (MSIX or installer — currently an unsigned portable build only).
-5. **Phase 8/9 polish**: accessibility pass, localization-ready strings audit, and a real automated
-   integration/UI test harness (current coverage is 138 automated tests across Domain/Application/Infrastructure plus a lot of manual/live
-   verification — solid for what it covers, but nothing exercises the full stack end-to-end automatically).
+   10 + clean Windows 11 install testing, automated WinAppDriver-style UI automation, long-duration/high-throughput
+   benchmarks, and signed release packaging (MSIX or installer — currently an unsigned portable build only). Most
+   of these need something this environment doesn't have (a signing cert, a second Windows machine, an
+   interactive session, or long-running live elevated testing).
+5. **Phase 8/9 polish**: a real automated integration/UI test harness and a localization-ready strings audit
+   remain outstanding (current coverage is 138 automated tests across Domain/Application/Infrastructure plus a
+   lot of manual/live verification — solid for what it covers, but nothing exercises the full stack end-to-end
+   automatically). **A first accessibility pass is done** (ADR-019): a real WCAG contrast failure fixed
+   (Dashboard Download/Upload figures in Light theme), three missing `AutomationProperties.Name` gaps fixed,
+   three ambiguous repeated list-item button labels disambiguated for screen readers, tab order audited (no
+   issues). Real screen-reader (Narrator/NVDA) and automated UI-accessibility testing remain outstanding — both
+   need an interactive Windows session this environment doesn't have.
 6. **Usage-report acceptance and packaging**: verify the native save picker and keyboard/screen-reader flows,
    benchmark large retained histories, then rebuild and verify the portable package when preparing a release.
    Daily/weekly/monthly/yearly/custom reporting itself is implemented; professional PDF reporting remains deferred.

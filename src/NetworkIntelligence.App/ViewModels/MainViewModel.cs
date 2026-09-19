@@ -196,10 +196,18 @@ public sealed record AppTrafficDisplay(ApplicationTrafficSample Value)
     public string Name => Value.ProcessName;
     public string Summary => $"PID {Value.Pid} · ↓ {MainViewModel.FormatRate(Value.ReceivedBytesPerSecond)} · ↑ {MainViewModel.FormatRate(Value.SentBytesPerSecond)}";
     public string Detail => $"Window total: ↓ {MainViewModel.Bytes(Value.ReceivedBytesTotal)}  ↑ {MainViewModel.Bytes(Value.SentBytesTotal)} · {Value.Events} events · {Value.WindowStart.ToLocalTime():T}–{Value.WindowEnd.ToLocalTime():T}";
+    /// <summary>Distinguishes this row's "Trust this app" button from every other row's identical-looking one
+    /// when a screen reader user navigates the Applications page by control type rather than linear reading
+    /// order, where the adjacent <see cref="Name"/> text wouldn't otherwise be heard.</summary>
+    public string TrustActionName => $"Trust {Name}";
 }
 public sealed record AlertDisplay(AnomalyEvent Value)
 {
     public string Title => $"{Value.Timestamp.ToLocalTime():g}   {Value.Severity}   {Value.ProcessName}";
     public string Summary => $"{(Value.Direction == "Download" ? "↓" : "↑")} {MainViewModel.FormatRate(Value.CurrentBytesPerSecond)} vs. baseline {MainViewModel.FormatRate(Value.BaselineMeanBytesPerSecond)}";
+    /// <summary>Distinguishes this row's Snooze/Dismiss buttons from every other row's identical-looking ones
+    /// for a screen reader user navigating by control type — see <see cref="AppTrafficDisplay.TrustActionName"/>.</summary>
+    public string SnoozeActionName => $"Snooze {Value.ProcessName} for 1 hour";
+    public string DismissActionName => $"Dismiss {Value.ProcessName} alert";
     public string Detail => Value.Explanation;
 }

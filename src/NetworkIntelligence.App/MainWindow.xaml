@@ -5,9 +5,26 @@
  Title="Network Intelligence">
  <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
   <Grid.Resources>
-   <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}"/><Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20"/></Style>
-   <Style x:Key="Caption" TargetType="TextBlock"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
-   <Style x:Key="Heading" TargetType="TextBlock"><Setter Property="FontSize" Value="28"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+   <ResourceDictionary>
+    <!-- Light-theme values are darkened from the original #18BDAA/#6996F0 to clear WCAG AA's 3:1 large-text
+         contrast minimum against the near-white card background (measured ~2.3:1 and ~2.8:1 before this fix,
+         both failing); the original values already pass comfortably (~6:1/~4.9:1) against the dark card
+         background and are kept unchanged for Dark. "Default" also covers HighContrast, since no separate
+         HighContrast dictionary is defined below. -->
+    <ResourceDictionary.ThemeDictionaries>
+     <ResourceDictionary x:Key="Default">
+      <SolidColorBrush x:Key="DownloadAccentBrush" Color="#0C7367"/>
+      <SolidColorBrush x:Key="UploadAccentBrush" Color="#2F5FCC"/>
+     </ResourceDictionary>
+     <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="DownloadAccentBrush" Color="#18BDAA"/>
+      <SolidColorBrush x:Key="UploadAccentBrush" Color="#6996F0"/>
+     </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+    <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}"/><Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20"/></Style>
+    <Style x:Key="Caption" TargetType="TextBlock"><Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+    <Style x:Key="Heading" TargetType="TextBlock"><Setter Property="FontSize" Value="28"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+   </ResourceDictionary>
   </Grid.Resources>
   <NavigationView x:Name="Navigation" PaneDisplayMode="Auto" OpenPaneLength="246" IsBackButtonVisible="Collapsed" IsSettingsVisible="True" SelectionChanged="NavigationChanged" Loaded="WindowLoaded">
    <NavigationView.PaneHeader><StackPanel Margin="14,18,0,22" Spacing="4"><TextBlock Text="NETWORK" FontSize="17" FontWeight="Bold" CharacterSpacing="170"/><TextBlock Text="INTELLIGENCE" FontSize="11" CharacterSpacing="210" Opacity="0.65"/></StackPanel></NavigationView.PaneHeader>
@@ -42,8 +59,8 @@
         <ComboBox Grid.Column="1" x:Name="AdapterPicker" Header="Adapter" Width="250" ItemsSource="{Binding Adapters}" DisplayMemberPath="Name" SelectionChanged="AdapterChanged" />
        </Grid>
        <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <Border Style="{StaticResource Card}"><StackPanel Spacing="10"><TextBlock Text="↓  DOWNLOAD" Style="{StaticResource Caption}"/><TextBlock Text="{Binding Download}" FontSize="34" FontWeight="SemiBold" Foreground="#18BDAA"/><TextBlock Text="Measured adapter throughput" Style="{StaticResource Caption}"/></StackPanel></Border>
-        <Border Grid.Column="1" Style="{StaticResource Card}"><StackPanel Spacing="10"><TextBlock Text="↑  UPLOAD" Style="{StaticResource Caption}"/><TextBlock Text="{Binding Upload}" FontSize="34" FontWeight="SemiBold" Foreground="#6996F0"/><TextBlock Text="Measured adapter throughput" Style="{StaticResource Caption}"/></StackPanel></Border>
+        <Border Style="{StaticResource Card}"><StackPanel Spacing="10"><TextBlock Text="↓  DOWNLOAD" Style="{StaticResource Caption}"/><TextBlock Text="{Binding Download}" FontSize="34" FontWeight="SemiBold" Foreground="{ThemeResource DownloadAccentBrush}"/><TextBlock Text="Measured adapter throughput" Style="{StaticResource Caption}"/></StackPanel></Border>
+        <Border Grid.Column="1" Style="{StaticResource Card}"><StackPanel Spacing="10"><TextBlock Text="↑  UPLOAD" Style="{StaticResource Caption}"/><TextBlock Text="{Binding Upload}" FontSize="34" FontWeight="SemiBold" Foreground="{ThemeResource UploadAccentBrush}"/><TextBlock Text="Measured adapter throughput" Style="{StaticResource Caption}"/></StackPanel></Border>
        </Grid>
        <Border Style="{StaticResource Card}"><Grid ColumnSpacing="20"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
         <StackPanel Spacing="4" VerticalAlignment="Center" MinWidth="120"><TextBlock Text="NETWORK HEALTH" Style="{StaticResource Caption}"/><TextBlock Text="{Binding HealthScoreText}" FontSize="34" FontWeight="SemiBold"/><TextBlock Text="{Binding HealthBandText}" Style="{StaticResource Caption}"/></StackPanel>
@@ -53,7 +70,7 @@
        </Grid></Border>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
         <Grid><TextBlock Text="Live traffic" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="↓ Download    ↑ Upload · last 90 samples" HorizontalAlignment="Right" Style="{StaticResource Caption}"/></Grid>
-        <lvc:CartesianChart Height="240" Series="{Binding Series}" XAxes="{Binding XAxes}" YAxes="{Binding YAxes}" AnimationsSpeed="0:0:0" />
+        <lvc:CartesianChart Height="240" Series="{Binding Series}" XAxes="{Binding XAxes}" YAxes="{Binding YAxes}" AnimationsSpeed="0:0:0" AutomationProperties.Name="Live download and upload throughput over the last 90 samples; exact values are provided above" />
         <TextBlock Text="{Binding MeasurementDetail}" Style="{StaticResource Caption}"/>
        </StackPanel></Border>
        <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -63,7 +80,7 @@
        <Border Style="{StaticResource Card}"><StackPanel Spacing="10">
         <TextBlock Text="Recent alerts" FontSize="18" FontWeight="SemiBold"/>
         <TextBlock Text="Unusual application bandwidth vs. learned baseline · bandwidth only, never a malware or security determination · see Application usage to mark an app trusted." Style="{StaticResource Caption}"/>
-        <ItemsControl ItemsSource="{Binding RecentAlerts}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Spacing="4"><TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}" TextWrapping="Wrap"/></StackPanel><StackPanel Grid.Column="1" Spacing="6"><Button Content="Snooze 1h" Click="SnoozeAlert" HorizontalAlignment="Stretch"/><Button Content="Dismiss" Click="DismissAlert" HorizontalAlignment="Stretch"/></StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+        <ItemsControl ItemsSource="{Binding RecentAlerts}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Spacing="4"><TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}" TextWrapping="Wrap"/></StackPanel><StackPanel Grid.Column="1" Spacing="6"><Button Content="Snooze 1h" AutomationProperties.Name="{Binding SnoozeActionName}" Click="SnoozeAlert" HorizontalAlignment="Stretch"/><Button Content="Dismiss" AutomationProperties.Name="{Binding DismissActionName}" Click="DismissAlert" HorizontalAlignment="Stretch"/></StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
        </StackPanel></Border>
        <InfoBar IsOpen="True" IsClosable="False" Severity="Informational" Title="Application intelligence is under validation" Message="Process connection ownership and live/stored per-app bandwidth are available (optional MonitoringService). Anomaly detection and the network health score above are both algorithmic and unvalidated at scale — see each card's contributing factors for what's actually measured."/>
       </StackPanel>
@@ -143,14 +160,14 @@
        <Border Style="{StaticResource Card}"><StackPanel Spacing="10">
         <TextBlock Text="Live per-application bandwidth (optional)" FontSize="18" FontWeight="SemiBold"/>
         <TextBlock Text="{Binding ApplicationTrafficStatus}" Style="{StaticResource Caption}"/>
-        <ItemsControl ItemsSource="{Binding LiveApplicationTraffic}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Spacing="4"><TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}"/></StackPanel><Button Grid.Column="1" Content="Trust this app" VerticalAlignment="Top" Click="TrustApplication"/></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+        <ItemsControl ItemsSource="{Binding LiveApplicationTraffic}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel Spacing="4"><TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}"/></StackPanel><Button Grid.Column="1" Content="Trust this app" AutomationProperties.Name="{Binding TrustActionName}" VerticalAlignment="Top" Click="TrustApplication"/></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
        </StackPanel></Border>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="10">
         <TextBlock Text="Stored per-application history (optional)" FontSize="18" FontWeight="SemiBold"/>
         <TextBlock Text="Uses the Raw history range under Bandwidth and data · minute buckets grouped by process ID and name, not a stable app identity · refresh from Bandwidth and data or on next launch." Style="{StaticResource Caption}"/>
         <ItemsControl ItemsSource="{Binding AppUsage}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><TextBlock Text="{Binding}" TextWrapping="Wrap"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
        </StackPanel></Border>
-       <TextBox x:Name="ApplicationSearch" PlaceholderText="Search application or PID" TextChanged="SearchChanged"/>
+       <TextBox x:Name="ApplicationSearch" PlaceholderText="Search application or PID" AutomationProperties.Name="Search application or PID" TextChanged="SearchChanged"/>
        <TextBlock Text="Sorted by socket count · IPv4/IPv6 TCP and UDP · live metadata only; no history stored for this list." Style="{StaticResource Caption}"/>
        <ItemsControl ItemsSource="{Binding Applications}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,10"><StackPanel Spacing="5"><TextBlock Text="{Binding Name}" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}"/></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
       </StackPanel>
@@ -168,7 +185,7 @@
        <ItemsControl ItemsSource="{Binding AlertHistory}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><StackPanel Spacing="4"><TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Text="{Binding Summary}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}" TextWrapping="Wrap"/></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
       </StackPanel>
       <StackPanel x:Name="DiagnosticsPage" Spacing="16" Visibility="Collapsed">
-       <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Check a network target" FontSize="20"/><TextBlock Text="Runs DNS resolution and 10 ICMP probes. Failed ping alone does not prove an internet outage. Your chosen target receives diagnostic traffic." TextWrapping="Wrap"/><TextBox x:Name="DiagnosticTarget" Header="Hostname or IP address" Text="1.1.1.1" MaxWidth="500" HorizontalAlignment="Left"/><StackPanel Orientation="Horizontal" Spacing="12"><Button x:Name="DiagnosticButton" Content="Run diagnostics" Click="DiagnosticsClicked"/><Button Content="Cancel test" Click="CancelDiagnostics"/></StackPanel><ProgressRing x:Name="DiagnosticProgress" IsActive="False" Width="24" Height="24" HorizontalAlignment="Left"/><TextBlock Text="{Binding DiagnosticText}" TextWrapping="Wrap"/></StackPanel></Border>
+       <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Check a network target" FontSize="20"/><TextBlock Text="Runs DNS resolution and 10 ICMP probes. Failed ping alone does not prove an internet outage. Your chosen target receives diagnostic traffic." TextWrapping="Wrap"/><TextBox x:Name="DiagnosticTarget" Header="Hostname or IP address" Text="1.1.1.1" MaxWidth="500" HorizontalAlignment="Left"/><StackPanel Orientation="Horizontal" Spacing="12"><Button x:Name="DiagnosticButton" Content="Run diagnostics" Click="DiagnosticsClicked"/><Button Content="Cancel test" Click="CancelDiagnostics"/></StackPanel><ProgressRing x:Name="DiagnosticProgress" IsActive="False" Width="24" Height="24" HorizontalAlignment="Left" AutomationProperties.Name="Diagnostics running"/><TextBlock Text="{Binding DiagnosticText}" TextWrapping="Wrap"/></StackPanel></Border>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="8"><TextBlock Text="Selected adapter configuration" FontSize="20"/><TextBlock Text="{Binding AddressDetail}" TextWrapping="Wrap"/><TextBlock Text="{Binding Gateway}" TextWrapping="Wrap"/><Button Content="Check database integrity" Click="IntegrityClicked"/></StackPanel></Border>
       </StackPanel>
       <StackPanel x:Name="SettingsPage" Spacing="18" Visibility="Collapsed">
@@ -198,7 +215,7 @@
       <StackPanel x:Name="AboutPage" Spacing="18" Visibility="Collapsed">
        <Border Style="{StaticResource Card}"><StackPanel Spacing="16">
         <StackPanel Orientation="Horizontal" Spacing="18">
-         <Image Source="Assets/AppIcon.png" Width="72" Height="72"/>
+         <Image Source="Assets/AppIcon.png" Width="72" Height="72" AutomationProperties.AccessibilityView="Raw"/>
          <StackPanel Spacing="4" VerticalAlignment="Center">
           <TextBlock Text="Network Intelligence" FontSize="24" FontWeight="SemiBold"/>
           <TextBlock x:Name="AboutVersionText" Style="{StaticResource Caption}"/>
