@@ -41,6 +41,25 @@ public sealed class StorageTests : IAsyncLifetime
         Assert.Empty(await store.GetUsageAsync(DateTimeOffset.MinValue, default)); Assert.Empty(await store.GetEventsAsync(default));
         Assert.Equal(14, (await store.LoadSettingsAsync(default)).RetentionDays);
     }
+    [Fact] public async Task SpeedProviderOverridePersistsAndCanReturnToAutomatic()
+    {
+        await store.SaveSettingsAsync(new() { SpeedTestEndpoint = "https://example.com/speed" }, default);
+        Assert.Equal("https://example.com/speed", (await store.LoadSettingsAsync(default)).SpeedTestEndpoint);
+        await store.SaveSettingsAsync((await store.LoadSettingsAsync(default)) with { SpeedTestEndpoint = "" }, default);
+        Assert.Equal(SpeedTestProvider.DefaultEndpoint, SpeedTestProvider.Resolve((await store.LoadSettingsAsync(default)).SpeedTestEndpoint));
+    }
+    [Fact] public async Task ExistingSettingsWithoutSpeedProviderLoadWithAutomaticDefault()
+    {
+        await using var connection = new SqliteConnection($"Data Source={Path.Combine(directory, "test.db")}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO Settings(Key, Json) VALUES('app', '{\"Theme\":\"Dark\"}')";
+        await command.ExecuteNonQueryAsync();
+        var settings = await store.LoadSettingsAsync(default);
+        Assert.Equal("Dark", settings.Theme);
+        Assert.Equal("", settings.SpeedTestEndpoint);
+        Assert.Equal(SpeedTestProvider.DefaultEndpoint, SpeedTestProvider.Resolve(settings.SpeedTestEndpoint));
+    }
     [Fact] public async Task JsonAndCsvExportRealAggregates()
     {
         await store.SaveAsync(Sample(DateTimeOffset.UtcNow, 100, 50), [], default);
@@ -113,6 +132,32 @@ public sealed class StorageTests : IAsyncLifetime
         Assert.Equal("recent.exe", Assert.Single(await store.GetAnomalyEventsAsync(10, default)).ProcessName);
         await store.DeleteHistoryAsync(default);
         Assert.Empty(await store.GetAnomalyEventsAsync(10, default));
+    }
+    [Fact] public async Task SpeedTestsPersistAndListNewestFirst()
+    {
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveSpeedTestAsync(new(now.AddMinutes(-5), "https://speed.cloudflare.com", 50.0, 10.0, 20.0, 2.0, 8.5), default);
+        await store.SaveSpeedTestAsync(new(now, "https://example.com/speed", 90.0, 30.0, 15.0, 1.0, 7.1), default);
+        var rows = await store.GetSpeedTestsAsync(10, default);
+        Assert.Equal(2, rows.Count);
+        Assert.Equal("https://example.com/speed", rows[0].Endpoint); // newest first
+        Assert.Equal("https://speed.cloudflare.com", rows[1].Endpoint);
+    }
+    [Fact] public async Task SpeedTestsRespectTheRequestedLimit()
+    {
+        var now = DateTimeOffset.UtcNow;
+        for (int i = 0; i < 5; i++)
+            await store.SaveSpeedTestAsync(new(now.AddMinutes(i), "https://speed.cloudflare.com", 50.0, 10.0, 20.0, 2.0, 8.5), default);
+        Assert.Equal(3, (await store.GetSpeedTestsAsync(3, default)).Count);
+    }
+    [Fact] public async Task SpeedTestRetentionAndDeletionMatchOtherHistory()
+    {
+        await store.SaveSpeedTestAsync(new(DateTimeOffset.UtcNow.AddDays(-400), "https://speed.cloudflare.com", 10.0, 5.0, 30.0, 3.0, 9.0), default);
+        await store.SaveSpeedTestAsync(new(DateTimeOffset.UtcNow, "https://speed.cloudflare.com", 90.0, 30.0, 15.0, 1.0, 7.1), default);
+        await store.CleanupAsync(365, default);
+        Assert.Equal(90.0, Assert.Single(await store.GetSpeedTestsAsync(10, default)).DownloadMbps);
+        await store.DeleteHistoryAsync(default);
+        Assert.Empty(await store.GetSpeedTestsAsync(10, default));
     }
     [Theory] [InlineData("=1+1")] [InlineData(" +cmd")] [InlineData("@formula")]
     public void CsvPreventsSpreadsheetFormulaInterpretation(string text) => Assert.StartsWith("\"'", ExportService.Csv(text));

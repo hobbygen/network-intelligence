@@ -3,7 +3,7 @@ using Microsoft.Data.Sqlite;
 using NetworkIntelligence.Contracts;
 namespace NetworkIntelligence.Infrastructure;
 
-public sealed class SqliteHistoryStore(string path) : IHistoryStore
+public sealed partial class SqliteHistoryStore(string path) : IHistoryStore
 {
     private readonly string connectionString = new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadWriteCreate, DefaultTimeout = 5 }.ToString();
     private readonly SemaphoreSlim gate = new(1, 1);
@@ -30,7 +30,7 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
         await Execute(connection, "CREATE TABLE IF NOT EXISTS SchemaMigrations(Version INTEGER PRIMARY KEY, AppliedUtc INTEGER NOT NULL);", token);
         await using var check = connection.CreateCommand(); check.CommandText = "SELECT COALESCE(MAX(Version),0) FROM SchemaMigrations";
         var version = Convert.ToInt32(await check.ExecuteScalarAsync(token));
-        if (version > 3) throw new InvalidOperationException("Database version is newer than this application. Use a newer application build.");
+        if (version > 4) throw new InvalidOperationException("Database version is newer than this application. Use a newer application build.");
         if (version < 1)
         {
             using var transaction = connection.BeginTransaction();
@@ -72,6 +72,17 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
                     Deviation REAL NOT NULL, Explanation TEXT NOT NULL, Notified INTEGER NOT NULL);
                 CREATE INDEX IX_AnomalyEvents_Time ON AnomalyEvents(Time);
                 INSERT INTO SchemaMigrations VALUES(3,unixepoch());
+                """;
+            await migration.ExecuteNonQueryAsync(token); transaction.Commit();
+        }
+        if (version < 4)
+        {
+            using var transaction = connection.BeginTransaction();
+            await using var migration = connection.CreateCommand(); migration.Transaction = transaction;
+            migration.CommandText = """
+                CREATE TABLE SpeedTests(Id INTEGER PRIMARY KEY, Time INTEGER NOT NULL, Json TEXT NOT NULL);
+                CREATE INDEX IX_SpeedTests_Time ON SpeedTests(Time);
+                INSERT INTO SchemaMigrations VALUES(4,unixepoch());
                 """;
             await migration.ExecuteNonQueryAsync(token); transaction.Commit();
         }
@@ -217,13 +228,26 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
     {
         await Execute(connection, "INSERT INTO Diagnostics(Time,Json) VALUES($time,$json)", token, ("$time", result.Timestamp.ToUnixTimeSeconds()), ("$json", JsonSerializer.Serialize(result))); return 0;
     }, token);
+    public Task SaveSpeedTestAsync(SpeedTestRecord result, CancellationToken token) => WithConnection(async connection =>
+    {
+        await Execute(connection, "INSERT INTO SpeedTests(Time,Json) VALUES($time,$json)", token, ("$time", result.Timestamp.ToUnixTimeSeconds()), ("$json", JsonSerializer.Serialize(result))); return 0;
+    }, token);
+    public Task<IReadOnlyList<SpeedTestRecord>> GetSpeedTestsAsync(int limit, CancellationToken token) => WithConnection<IReadOnlyList<SpeedTestRecord>>(async connection =>
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Json FROM SpeedTests ORDER BY Time DESC,Id DESC LIMIT $limit";
+        command.Parameters.AddWithValue("$limit", limit);
+        var rows = new List<SpeedTestRecord>(); await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) rows.Add(JsonSerializer.Deserialize<SpeedTestRecord>(reader.GetString(0))!);
+        return rows;
+    }, token);
     public Task<int> CleanupAsync(int retentionDays, CancellationToken token)
     {
         if (retentionDays is < 1 or > 3650) throw new ArgumentOutOfRangeException(nameof(retentionDays));
         return WithConnection(async connection =>
         {
             int count = 0; var cutoff = DateTimeOffset.UtcNow.AddDays(-retentionDays).ToUnixTimeSeconds();
-            foreach (var (table, column) in new[] { ("TrafficMinutes", "Minute"), ("ConnectionEvents", "Time"), ("Diagnostics", "Time"), ("ApplicationTrafficMinutes", "Minute"), ("AnomalyEvents", "Time") })
+            foreach (var (table, column) in new[] { ("TrafficMinutes", "Minute"), ("ConnectionEvents", "Time"), ("Diagnostics", "Time"), ("ApplicationTrafficMinutes", "Minute"), ("AnomalyEvents", "Time"), ("SpeedTests", "Time") })
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = $"DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {column} < $cutoff LIMIT 2000)";
@@ -234,7 +258,7 @@ public sealed class SqliteHistoryStore(string path) : IHistoryStore
     }
     public Task DeleteHistoryAsync(CancellationToken token) => WithConnection(async connection =>
     {
-        await Execute(connection, "BEGIN; DELETE FROM TrafficMinutes; DELETE FROM ConnectionEvents; DELETE FROM Diagnostics; DELETE FROM Adapters; DELETE FROM ApplicationTrafficMinutes; DELETE FROM AnomalyEvents; COMMIT; PRAGMA wal_checkpoint(TRUNCATE);", token); return 0;
+        await Execute(connection, "BEGIN; DELETE FROM TrafficMinutes; DELETE FROM ConnectionEvents; DELETE FROM Diagnostics; DELETE FROM Adapters; DELETE FROM ApplicationTrafficMinutes; DELETE FROM AnomalyEvents; DELETE FROM SpeedTests; COMMIT; PRAGMA wal_checkpoint(TRUNCATE);", token); return 0;
     }, token);
     public Task<string> CheckIntegrityAsync(CancellationToken token) => WithConnection(async connection =>
     {

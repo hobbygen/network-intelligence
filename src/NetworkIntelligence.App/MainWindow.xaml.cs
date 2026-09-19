@@ -32,6 +32,7 @@ public sealed partial class MainWindow : Window
         this.monitoring = monitoring; this.store = store; this.diagnostics = diagnostics; this.transfer = transfer; this.anomalyDetection = anomalyDetection;
         InitializeComponent();
         Root.DataContext = ViewModel;
+        UsageReportPanel.DataContext = Reports;
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1280, 920));
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
         if (File.Exists(iconPath)) AppWindow.SetIcon(iconPath);
@@ -78,6 +79,7 @@ public sealed partial class MainWindow : Window
             var settings = await Task.Run(() => store.LoadSettingsAsync(CancellationToken.None));
             monitoring.UpdateSettings(settings); anomalyDetection.UpdateSettings(settings); ApplySettings(settings);
             await LoadHistoryAsync();
+            await InitializeUsageReportsAsync();
             foreach (var alert in (await Task.Run(() => store.GetAnomalyEventsAsync(50, CancellationToken.None))).Reverse()) ViewModel.AddAlert(alert);
             ViewModel.Status = "Monitoring locally · no cloud account required";
         }
@@ -92,6 +94,20 @@ public sealed partial class MainWindow : Window
                 var pageArgs = Environment.GetCommandLineArgs();
                 int pageIndex = Array.IndexOf(pageArgs, "--smoke-page");
                 if (pageIndex >= 0 && pageIndex + 1 < pageArgs.Length) ShowPage(pageArgs[pageIndex + 1]);
+                if (currentPage == "Usage")
+                {
+                    int periodIndex = Array.IndexOf(pageArgs, "--smoke-report-period");
+                    if (periodIndex >= 0 && periodIndex + 1 < pageArgs.Length &&
+                        Enum.TryParse<NetworkIntelligence.Domain.UsageReportPeriod>(pageArgs[periodIndex + 1], out var period) && Enum.IsDefined(period))
+                        ReportPeriodPicker.SelectedIndex = (int)period;
+                    await RefreshUsageReportAsync();
+                    if (pageArgs.Contains("--smoke-report-details")) ReportDailyBreakdown.IsExpanded = true;
+                    await Task.Delay(800);
+                }
+                if (currentPage == "Performance" && pageArgs.Contains("--smoke-speed-history")) { SpeedHistoryExpander.IsExpanded = true; await Task.Delay(500); }
+                int scrollIndex = Array.IndexOf(pageArgs, "--smoke-scroll");
+                if (scrollIndex >= 0 && scrollIndex + 1 < pageArgs.Length && double.TryParse(pageArgs[scrollIndex + 1], out double offset))
+                { PageScroll.ChangeView(null, offset, null, true); await Task.Delay(500); }
                 var result = new { Adapters = ViewModel.Adapters.Count, PersistedAdapters = usage.Count, Integrity = await Task.Run(() => store.CheckIntegrityAsync(CancellationToken.None)), ViewModel.Status };
                 await File.WriteAllTextAsync(Path.Combine(App.DataDirectory, "smoke-result.json"), JsonSerializer.Serialize(result));
                 // Render the app's own visual tree for layout verification in automated test runs.
@@ -127,6 +143,10 @@ public sealed partial class MainWindow : Window
         AlertsEnabled.IsOn = settings.AlertsEnabled; QuietEnabled.IsOn = settings.QuietHoursEnabled;
         QuietStart.Value = settings.QuietStartHour; QuietEnd.Value = settings.QuietEndHour;
         DiagnosticTarget.Text = settings.DiagnosticTarget;
+        SpeedEndpoint.Text = settings.SpeedTestEndpoint;
+        SpeedProviderText.Text = string.IsNullOrWhiteSpace(settings.SpeedTestEndpoint)
+            ? "Automatic · Cloudflare · serving edge selected by network routing"
+            : $"Custom provider · {SpeedTestProvider.Resolve(settings.SpeedTestEndpoint)}";
         AnomalyEnabled.IsOn = settings.AnomalyDetectionEnabled; AnomalySensitivity.Value = settings.AnomalySensitivity;
         NoTrustedApplicationsText.Visibility = settings.TrustedApplications.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         TrustedApplicationsList.ItemsSource = settings.TrustedApplications;
@@ -190,6 +210,7 @@ public sealed partial class MainWindow : Window
         foreach (var item in pages) item.Value.Visibility = item.Key == page ? Visibility.Visible : Visibility.Collapsed;
         PageTitle.Text = page switch { "Dashboard" => "Network overview", "Wifi" => "Wi-Fi", "Performance" => "Network performance", "Usage" => "Bandwidth and data", "Applications" => "Application usage", "History" => "Connection history", _ => page };
         if (page == "Applications") ViewModel.FilterApplications(ApplicationSearch.Text);
+        if (page == "Usage" && reportsReady) _ = RefreshUsageReportAsync();
     }
     private void AdapterChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -231,7 +252,7 @@ public sealed partial class MainWindow : Window
     private async Task ShutdownAsync()
     {
         if (quitting) return;
-        quitting = true; diagnosticCancellation?.Cancel(); speedCancellation?.Cancel();
+        quitting = true; diagnosticCancellation?.Cancel(); speedCancellation?.Cancel(); reportCancellation?.Cancel();
         await monitoring.DisposeAsync(); tray?.Dispose(); Close();
     }
     private void ConnectionChanges(IReadOnlyList<ConnectionEvent> events)
@@ -284,21 +305,88 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { ViewModel.DiagnosticText += "\n" + ex.Message; }
         finally { ViewModel.Changed(nameof(ViewModel.DiagnosticText)); diagnosticCancellation.Dispose(); diagnosticCancellation = null; DiagnosticButton.IsEnabled = true; DiagnosticProgress.IsActive = false; }
     }
-    private void CancelDiagnostics(object sender, RoutedEventArgs e) { diagnosticCancellation?.Cancel(); speedCancellation?.Cancel(); }
+    private void CancelDiagnostics(object sender, RoutedEventArgs e) => diagnosticCancellation?.Cancel();
+    private void CancelSpeedTest(object sender, RoutedEventArgs e)
+    {
+        speedCancellation?.Cancel();
+        SpeedCancelButton.IsEnabled = false;
+        SpeedStage.Text = "Cancelling…";
+    }
+    private void OpenSpeedSettings(object sender, RoutedEventArgs e) => Navigation.SelectedItem = Navigation.SettingsItem;
+    private async void SaveSpeedProvider(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string endpoint = SpeedEndpoint.Text.Trim();
+            _ = SpeedTestProvider.Resolve(endpoint);
+            var settings = monitoring.Settings with { SpeedTestEndpoint = endpoint };
+            await Task.Run(() => store.SaveSettingsAsync(settings, CancellationToken.None));
+            monitoring.UpdateSettings(settings); anomalyDetection.UpdateSettings(settings);
+            SpeedProviderText.Text = string.IsNullOrWhiteSpace(endpoint)
+                ? "Automatic · Cloudflare · serving edge selected by network routing"
+                : $"Custom provider · {SpeedTestProvider.Resolve(endpoint)}";
+            SpeedProviderStatus.Text = "Provider saved. Applies to the next test.";
+        }
+        catch (Exception ex) { SpeedProviderStatus.Text = "Provider not saved: " + ex.Message; }
+    }
     private async void SpeedClicked(object sender, RoutedEventArgs e)
     {
         if (speedCancellation is not null) return;
-        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = "Run a bandwidth-consuming test?", Content = $"Endpoint: {SpeedEndpoint.Text}\nUp to 25 MB download and 10 MB random test upload, plus protocol overhead. Your public IP is visible to the provider. No application data is uploaded.", PrimaryButtonText = "Run test", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        speedCancellation = new(); SpeedButton.IsEnabled = false; SpeedResult.Text = "Testing… You can cancel from Diagnostics.";
+        using var cancellation = new CancellationTokenSource();
+        speedCancellation = cancellation;
+        SpeedButton.IsEnabled = false;
+        SpeedCancelButton.IsEnabled = true;
+        SpeedSpinner.IsActive = true;
+        SpeedProgress.Visibility = Visibility.Visible;
+        SpeedProgress.Value = 0;
+        SpeedDown.Text = SpeedUp.Text = SpeedLatency.Text = SpeedJitter.Text = "—";
+        SpeedStage.Text = "Selecting provider…";
+        SpeedResult.Text = "Incomplete measurements are discarded if the test fails or is cancelled.";
+        var progress = new Progress<TransferProgress>(value =>
+        {
+            // Ignore queued updates from a completed/cancelled run, including after a new run starts.
+            if (speedCancellation != cancellation || cancellation.IsCancellationRequested) return;
+            SpeedStage.Text = value.Stage;
+            SpeedProgress.Value = value.Percent;
+        });
         try
         {
-            var result = await transfer.RunAsync(SpeedEndpoint.Text.Trim(), speedCancellation.Token);
-            SpeedResult.Text = $"{result.Timestamp.ToLocalTime():g} · {result.Endpoint}\n↓ {result.DownloadMbps:0.00} Mbps · ↑ {result.UploadMbps:0.00} Mbps\nHTTP response {result.HttpResponseMilliseconds:0.0} ms · {result.DurationSeconds:0.0} seconds\n{result.Detail}";
+            string endpoint = monitoring.Settings.SpeedTestEndpoint;
+            var result = await Task.Run(() => transfer.RunAsync(endpoint, cancellation.Token, progress));
+            cancellation.Token.ThrowIfCancellationRequested();
+            SpeedDown.Text = $"{result.DownloadMbps:0.00}";
+            SpeedUp.Text = $"{result.UploadMbps:0.00}";
+            SpeedLatency.Text = $"{result.HttpResponseMilliseconds:0.0}";
+            SpeedJitter.Text = $"{result.HttpJitterMilliseconds:0.0}";
+            SpeedProgress.Value = 100;
+            SpeedStage.Text = $"Complete · {result.DurationSeconds:0.0} seconds · 35 MB payload transferred";
+            SpeedResult.Text = $"{result.Timestamp.ToLocalTime():g} · {result.Endpoint}\n{result.LatencySamples} HTTP latency samples after connection warm-up.\n{result.Detail}";
+            var record = new SpeedTestRecord(result.Timestamp, result.Endpoint, result.DownloadMbps, result.UploadMbps, result.HttpResponseMilliseconds, result.HttpJitterMilliseconds, result.DurationSeconds);
+            await Task.Run(() => store.SaveSpeedTestAsync(record, CancellationToken.None));
+            await LoadSpeedHistoryAsync();
         }
-        catch (OperationCanceledException) { SpeedResult.Text = "Test cancelled or timed out; incomplete results discarded."; }
-        catch (Exception ex) { SpeedResult.Text = "Test failed: " + ex.Message; }
-        finally { speedCancellation.Dispose(); speedCancellation = null; SpeedButton.IsEnabled = true; }
+        catch (OperationCanceledException)
+        {
+            SpeedStage.Text = "Cancelled";
+            SpeedResult.Text = "Incomplete results were discarded. Data already transferred still counts toward your usage.";
+        }
+        catch (TimeoutException ex) { SpeedStage.Text = "Timed out"; SpeedResult.Text = ex.Message; }
+        catch (System.Net.Http.HttpRequestException ex)
+        {
+            SpeedStage.Text = "Provider unavailable";
+            SpeedResult.Text = ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests
+                ? "The provider is limiting requests. Wait before trying again. No automatic retry was made."
+                : "Could not complete the test. Check your connection or choose a compatible provider in Settings. " + ex.Message;
+        }
+        catch (Exception ex) { SpeedStage.Text = "Test failed"; SpeedResult.Text = ex.Message; }
+        finally
+        {
+            speedCancellation = null;
+            SpeedButton.IsEnabled = true;
+            SpeedCancelButton.IsEnabled = false;
+            SpeedSpinner.IsActive = false;
+            if (SpeedProgress.Value < 100) SpeedProgress.Visibility = Visibility.Collapsed;
+        }
     }
     private DateTimeOffset HistoryFrom() => DateTimeOffset.UtcNow.AddDays(HistoryRange.SelectedIndex switch { 0 => -1, 2 => -30, 3 => -365, _ => -7 });
     private async Task LoadHistoryAsync()
@@ -315,6 +403,16 @@ public sealed partial class MainWindow : Window
         ViewModel.AppUsage.Clear();
         foreach (var row in appUsage) ViewModel.AppUsage.Add($"{row.ProcessName} (PID {row.Pid})\n↓ {MainViewModel.Bytes(row.ReceivedBytes)}    ↑ {MainViewModel.Bytes(row.SentBytes)}\n{row.Windows:N0} five-second windows · {row.First.ToLocalTime():g} – {row.Last.ToLocalTime():g}");
         if (appUsage.Count == 0) ViewModel.AppUsage.Add("No stored per-application history yet — requires the optional MonitoringService to have been running during this range.");
+        await LoadSpeedHistoryAsync();
+    }
+    private const int SpeedHistoryLimit = 10;
+    private async Task LoadSpeedHistoryAsync()
+    {
+        var speedTests = await Task.Run(() => store.GetSpeedTestsAsync(SpeedHistoryLimit, CancellationToken.None));
+        ViewModel.SpeedTests.Clear();
+        foreach (var row in speedTests)
+            ViewModel.SpeedTests.Add($"{row.Timestamp.ToLocalTime():g} · {row.Endpoint}\n↓ {row.DownloadMbps:0.00} Mbps    ↑ {row.UploadMbps:0.00} Mbps    {row.HttpResponseMilliseconds:0.0} ms latency · {row.HttpJitterMilliseconds:0.0} ms jitter\n{row.DurationSeconds:0.0} seconds total");
+        if (speedTests.Count == 0) ViewModel.SpeedTests.Add($"No speed tests recorded yet · last {SpeedHistoryLimit} runs are kept here.");
     }
     private async void RefreshHistory(object sender, RoutedEventArgs e)
     {
@@ -323,6 +421,7 @@ public sealed partial class MainWindow : Window
     private void HistoryRangeChanged(object sender, SelectionChangedEventArgs e) { if (loaded) RefreshHistory(sender, new()); }
     private async void ExportClicked(object sender, RoutedEventArgs e)
     {
+        if (currentPage == "Usage" && sender is not Button { Tag: "RawUsage" }) { await ExportUsageReportAsync(); return; }
         if (currentPage == "Diagnostics" && lastDiagnostic is null) { ViewModel.Status = "Run diagnostics before exporting a result."; return; }
         try
         {
@@ -357,7 +456,7 @@ public sealed partial class MainWindow : Window
         {
             var settings = monitoring.Settings with { RetentionDays = checked((int)Retention.Value), Theme = ThemePicker.SelectedIndex == 2 ? "Dark" : ThemePicker.SelectedIndex == 1 ? "Light" : "System", CloseToTray = CloseToTray.IsOn,
                 CollectAddresses = CollectAddresses.IsOn, CollectSsid = CollectSsid.IsOn, CollectProcessNames = CollectNames.IsOn, AlertsEnabled = AlertsEnabled.IsOn,
-                QuietHoursEnabled = QuietEnabled.IsOn, QuietStartHour = checked((int)QuietStart.Value), QuietEndHour = checked((int)QuietEnd.Value), DiagnosticTarget = DiagnosticTarget.Text.Trim(),
+                QuietHoursEnabled = QuietEnabled.IsOn, QuietStartHour = checked((int)QuietStart.Value), QuietEndHour = checked((int)QuietEnd.Value), DiagnosticTarget = DiagnosticTarget.Text.Trim(), SpeedTestEndpoint = SpeedEndpoint.Text.Trim(),
                 AnomalyDetectionEnabled = AnomalyEnabled.IsOn, AnomalySensitivity = AnomalySensitivity.Value };
             settings.Validate(); await Task.Run(() => store.SaveSettingsAsync(settings, CancellationToken.None));
             monitoring.UpdateSettings(settings); anomalyDetection.UpdateSettings(settings); ApplySettings(settings);
@@ -372,9 +471,9 @@ public sealed partial class MainWindow : Window
     }
     private async void DeleteHistory(object sender, RoutedEventArgs e)
     {
-        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = "Delete stored history?", Content = "Deletes traffic aggregates, connection events and diagnostics from this local database. Settings are kept. Monitoring continues and will record new history.", PrimaryButtonText = "Delete history", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
+        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = "Delete stored history?", Content = "Deletes traffic aggregates, connection events, diagnostics and speed-test history from this local database. Settings are kept. Monitoring continues and will record new history.", PrimaryButtonText = "Delete history", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-        try { await Task.Run(() => store.DeleteHistoryAsync(CancellationToken.None)); monitoring.ResetSession(); ViewModel.ClearSession(); await LoadHistoryAsync(); ViewModel.Status = "Stored history deleted."; }
+        try { await Task.Run(() => store.DeleteHistoryAsync(CancellationToken.None)); monitoring.ResetSession(); ViewModel.ClearSession(); await LoadHistoryAsync(); await RefreshUsageReportAsync(); ViewModel.Status = "Stored history deleted."; }
         catch (Exception ex) { ViewModel.Status = "Deletion failed: " + ex.Message; }
     }
 }

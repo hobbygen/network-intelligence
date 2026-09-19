@@ -1,12 +1,14 @@
 # Network Intelligence — Progress Snapshot
 
-**As of:** 2026-09-18 · **Branch:** master · **Last commit:** `fc7163e` "Add application icon, About page, and fix the theme toggle"
-**Version:** 0.2.0 early access · **Tests:** 75/75 passing (`tests/NetworkIntelligence.Domain.Tests`) · **Build:** clean (`dotnet build NetworkIntelligence.slnx`)
+**As of:** 2026-09-19 · **Branch:** master · **Last commit:** `be09b35` "Add App_Progress.md as a fast-orientation status snapshot"
+**Working tree:** adds one-click speed testing (ADR-014), usage reports (ADR-015) and persisted speed-test history (ADR-016); not yet committed.
+**Version:** 0.2.0 early access · **Tests:** 132/132 passing (`tests/NetworkIntelligence.Domain.Tests`) · **Build:** clean (`dotnet build NetworkIntelligence.slnx`)
+**Package:** existing portable ZIP has not been rebuilt with the latest speed-test and usage-report changes.
 
 This file is a fast-orientation snapshot for picking the work back up. It does not replace the detailed records —
 when you need the *why* behind something, go to the source of truth:
 
-- **`docs/DECISIONS.md`** — every architecture/feature decision as a numbered ADR (ADR-001 through ADR-013), each
+- **`docs/DECISIONS.md`** — every architecture/feature decision as a numbered ADR (ADR-001 through ADR-016), each
   with rationale, what was validated, and known caveats. Always check here before assuming something is unbuilt.
 - **`CHANGELOG.md`** — chronological, more implementation-detail-heavy than the ADRs.
 - **`docs/TEST_REPORT.md`** — what's been tested/verified and, critically, its "Remaining acceptance work" section
@@ -26,7 +28,7 @@ the optional elevated `MonitoringService`, validated against a known-traffic ref
 `docs/ETW_ACCURACY.md`).
 
 ### Application shell (Phase 2)
-WinUI 3 app (`NetworkIntelligence.App`), unpackaged, self-contained. Sidebar `NavigationView` with 9 pages
+WinUI 3 app (`NetworkIntelligence.App`), unpackaged, self-contained. Sidebar `NavigationView` with 8 main pages
 (Overview/Ethernet/Wi-Fi/Network performance/Bandwidth and data/Application usage/Connection history/Diagnostics)
 plus **Settings** and the new **About** page. System tray with custom icon, native notifications, pause/resume.
 Light/dark/system theme — **was broken, now fixed** (see "Recently fixed" below). Custom multi-resolution app icon
@@ -38,14 +40,35 @@ aggregates, one-year default retention with configurable cleanup, connection his
 
 ### Diagnostics & speed testing (Phase 4)
 Cancellable DNS/ICMP diagnostics (`Diagnostics` class) against a user-configurable target — these numbers now
-also feed the health score (see below). **Bounded HTTPS transfer test exists** (`TransferTest.cs`) but requires
-the user to supply their own provider endpoint (a base URL implementing `/__down`/`/__up`) — there's no automatic
-provider selection/discovery yet, so spec section 9.1's "automatically select a reliable supported provider" is
-not fully met.
+also feed the health score (see below). **One-click bounded HTTPS speed testing is now implemented** (ADR-014): automatic Cloudflare selection with
+network-routed serving edge, saved optional custom HTTPS endpoint, same-page progress/Cancel, download/upload
+results, five-sample HTTP latency and jitter. 25 MB download + 10 MB random upload, 60-second deadline, manual
+runs only. Failure/cancellation discards incomplete results; rate limits are not retried. Live endpoint transfer
+and WinUI page renders verified. This is bounded throughput, not maximum line speed; packet loss is unavailable.
+One built-in provider, not a ranked multi-provider catalog. **A completed run is now persisted** (ADR-016, database schema version 4): a "Recent speed tests" card on Network performance shows the last 10 runs, loaded on startup/refresh and right after a new run finishes. Only successful runs are stored — cancelled/failed/timed-out results are discarded, same as before. Wired into the existing retention and full-deletion paths. See `docs/TEST_REPORT.md` for evidence.
 
 ### Analytics & export (Phase 5)
-Live charts, CSV/JSON export for adapter and per-application usage, session statistics. No dedicated
-daily/weekly/monthly/yearly rollup reports beyond the raw exportable history.
+Live charts, CSV/JSON export for adapter and per-application usage, session statistics. **Dedicated usage reports
+are implemented** on **Bandwidth and data** (ADR-015): today, this week, this month, this year and custom dates
+(up to 366 inclusive days). Weeks start Monday; local calendar boundaries account for daylight-saving changes
+and the current period stops at the snapshot time. The yearly preset includes leap-year support.
+
+Reports show separate adapter totals, daily charts, an expandable daily breakdown and approximate recorded
+coverage. Missing measurements remain unavailable rather than becoming zero; measured idle intervals show
+zero. Physical/VPN adapter totals are never added together, and overlapping coverage is flagged. Existing
+minute aggregates supply the reports, with no schema migration; midnight-crossing intervals are not split.
+
+The top ten application names are ranked across all interfaces, independently of the selected adapter.
+CSV/JSON exports capture the displayed snapshot and selected adapter plus the complete application breakdown.
+Application identity remains process-name based and service coverage is unknown. Refresh cancels superseded
+queries, and deleting history refreshes the report.
+
+**Validation:** 30 report test cases cover calendar boundaries, DST, leap years, missing versus zero data,
+adapter separation, application grouping, coverage caps, cancellation, export and history deletion. The latest
+solution build passed with zero warnings/errors and all 129 tests passed. The yearly WinUI report was visually
+checked using isolated synthetic data; database integrity was `ok`. Local evidence:
+`artifacts/report-ui-yearly-final/smoke-preview.png`. Native export-picker interaction, keyboard/screen-reader
+behavior and long-duration/high-volume report performance remain unverified.
 
 ### Application monitoring (Phase 6, ADR-007–010, ADR-012)
 Elevated `MonitoringService` (Generic Host worker, named-pipe IPC, least-privilege) does real per-process TCP/UDP
@@ -71,7 +94,7 @@ recent disconnects), weighted-averaging only the currently-available ones — ne
 card shows the score, a qualitative band, and every factor's own detail. **Weights/curves are a provisional first
 pass**, not validated against real user-perceived quality.
 
-### Recently fixed (this session, not yet mentioned above)
+### Previously completed shell fixes (commit `fc7163e`)
 - **Theme toggle bug**: previously only applied after clicking "Save settings," and that save's validation of
   unrelated fields could silently block it. Now applies and persists immediately on ComboBox selection. See
   `CHANGELOG.md` "Unreleased" and the commit `fc7163e` message for the full diagnosis.
@@ -84,7 +107,7 @@ pass**, not validated against real user-perceived quality.
 
 ## What's outstanding
 
-Roughly in the order it'd make sense to pick things up, but none of it is blocking — pick whatever's relevant:
+The following work remains; release acceptance items still limit production readiness:
 
 1. **A dedicated alert-history page.** The Dashboard "Recent alerts" card (capped at 50 rows, persisted, loaded
    on startup) already covers the spec's literal "alert history" requirement (section 12.6). A separate
@@ -98,15 +121,19 @@ Roughly in the order it'd make sense to pick things up, but none of it is blocki
    name-loss bug but deliberately didn't take on full stable identity (executable path, PID-reuse
    disambiguation within a single window). Flagged as the natural next step if it turns out to matter in
    practice.
-4. **Automatic speed-test provider selection** (spec 9.1) — currently requires a manually-configured endpoint.
+4. **Speed-test follow-ups (optional)** — additional supported providers or adaptive line-capacity estimation;
+   automatic selection of the built-in provider (ADR-014) and persisted result history (ADR-016) are implemented.
 5. **`docs/TEST_REPORT.md`'s "Remaining acceptance work" list** — the authoritative, longer catalog: controlled
    byte-accuracy edge cases (concurrent processes, UDP, real adapters), ETW CPU/memory overhead benchmark,
    MonitoringService code signing + dedicated service account, automated unauthorized-IPC-client tests, Windows
    10 + clean Windows 11 install testing, UI automation/accessibility coverage, long-duration/high-throughput
    benchmarks, and signed release packaging (MSIX or installer — currently an unsigned portable build only).
 6. **Phase 8/9 polish**: accessibility pass, localization-ready strings audit, and a real automated
-   integration/UI test harness (current coverage is 75 Domain/Application unit tests plus a lot of manual/live
+   integration/UI test harness (current coverage is 129 automated tests across Domain/Application/Infrastructure plus a lot of manual/live
    verification — solid for what it covers, but nothing exercises the full stack end-to-end automatically).
+7. **Usage-report acceptance and packaging**: verify the native save picker and keyboard/screen-reader flows,
+   benchmark large retained histories, then rebuild and verify the portable package when preparing a release.
+   Daily/weekly/monthly/yearly/custom reporting itself is implemented; professional PDF reporting remains deferred.
 
 ## Known environment quirk
 

@@ -24,7 +24,7 @@ Choose a host name or IP in Diagnostics, then run the test. It resolves DNS and 
 
 The Network performance page can explicitly run an HTTPS transfer test. The default provider is Cloudflare's documented speed endpoints; its network chooses the serving edge. Compatible custom HTTPS base endpoints can be entered for the current session. Each test downloads up to 25 MB and uploads up to 10 MB of generated random data, plus protocol overhead. Confirm the endpoint and data use before starting. The provider sees the public IP, as with any internet request. No application/user files or result-logging requests are uploaded. Overall timeout is 60 seconds. The Diagnostics cancel button also cancels a transfer test.
 
-These rates describe individual HTTP transfers including request/server overhead; they are not certified maximum internet bandwidth. The upload calculation uses the submitted request-body size after a successful HTTP response, not independently verified server byte accounting. HTTP response time is not ICMP latency. Speed jitter/loss is unavailable. Results are currently shown only for the session and are not retained. Public-provider behavior has not been live-validated in this build.
+These rates describe individual HTTP transfers including request/server overhead; they are not certified maximum internet bandwidth. The upload calculation uses the submitted request-body size after a successful HTTP response, not independently verified server byte accounting. HTTP response time is not ICMP latency. Speed jitter/loss is unavailable. A completed run is saved locally and shown under "Recent speed tests" (last 10); a cancelled, timed-out or failed run is never saved. Deleting stored history also clears saved speed tests. Public-provider behavior has not been live-validated in this build.
 
 ## Applications and alerts
 
@@ -35,6 +35,14 @@ Live per-application download/upload rates, and a stored per-application history
 Application anomaly detection compares each application's current download/upload rate against a locally learned baseline (Settings > "Application anomaly detection"). A new application is never flagged — it needs at least 7 days and 60 samples of history before any alert is possible, and the deviation must persist for at least 30 seconds before an alert fires, with a 15-minute cooldown per app/direction after that. Sensitivity is adjustable in Settings. Detected anomalies appear in the Dashboard's "Recent alerts" card and describe the rate, baseline, and how far it deviated — bandwidth only, never a claim that an application is malware or otherwise malicious. These thresholds are provisional defaults, not validated against real long-running usage; expect them to need tuning.
 
 Connection alerts use Windows native tray notifications for observed adapter disconnects, and anomaly alerts use the same native notifications when they fire. Settings include quiet hours and alert enablement for both; cooldown is five minutes per adapter for connection alerts and fifteen minutes per app/direction for anomaly alerts. Equal start/end quiet hours mean all-day quiet. Quiet hours suppress the notification only — an anomaly is still recorded and visible in "Recent alerts" when quiet hours are active. Notification delivery also depends on Windows notification settings.
+
+## Usage reports
+
+Open **Bandwidth and data** and choose today, this week, this month, this year or custom dates (up to 366 inclusive days). Weeks start Monday; dates follow the computer's local time zone. Select an adapter to see download/upload totals, a daily chart and approximate recorded coverage. Use **Refresh report** to include newer measurements and expand **Daily breakdown and coverage** for exact daily values.
+
+Missing measurements appear as gaps or unavailable values, while measured idle intervals show zero. Coverage counts only elapsed time, accounts for daylight-saving changes and is approximate at minute precision. Physical and virtual adapters can observe the same traffic, so their totals are kept separate. Overlapping coverage is flagged without guessing which bytes to remove.
+
+The application list ranks the top ten recorded process names across all interfaces, independently of the adapter selection. It needs history from the optional MonitoringService; absence of rows does not prove zero traffic. **Export report** saves the displayed range, selected adapter, daily coverage and complete application breakdown as CSV or JSON. Retention and monitoring downtime can leave gaps in any report.
 
 ## Privacy, data and retention
 

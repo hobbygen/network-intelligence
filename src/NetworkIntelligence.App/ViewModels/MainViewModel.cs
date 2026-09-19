@@ -23,6 +23,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<string> Events { get; } = [];
     public ObservableCollection<string> Usage { get; } = [];
     public ObservableCollection<string> AppUsage { get; } = [];
+    public ObservableCollection<string> SpeedTests { get; } = [];
     public ObservableCollection<AlertDisplay> RecentAlerts { get; } = [];
     public ObservableCollection<double?> Downloads { get; } = [];
     public ObservableCollection<double?> Uploads { get; } = [];

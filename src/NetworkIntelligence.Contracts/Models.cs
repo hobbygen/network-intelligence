@@ -18,6 +18,11 @@ public sealed record TrafficTotals(long Down, long Up);
 public sealed record DiagnosticResult(DateTimeOffset Timestamp, string Target, double? DnsMilliseconds,
     double? AverageMilliseconds, double? MinMilliseconds, double? MaxMilliseconds, double? JitterMilliseconds,
     double? LossPercent, int Attempts, int Replies, int LocalErrors, string Status, string Detail);
+/// <summary>A completed, persisted speed-test run (docs/DECISIONS.md ADR-016). Only ever written for a run that
+/// finished successfully — cancelled/failed/timed-out runs are never stored, matching TransferTest's own
+/// "incomplete results are discarded" contract.</summary>
+public sealed record SpeedTestRecord(DateTimeOffset Timestamp, string Endpoint, double DownloadMbps, double UploadMbps,
+    double HttpResponseMilliseconds, double HttpJitterMilliseconds, double DurationSeconds);
 public sealed record UsageSummary(string AdapterId, string AdapterName, long DownloadBytes, long UploadBytes,
     long Samples, double CoveredSeconds, DateTimeOffset First, DateTimeOffset Last);
 public sealed record HistoryPoint(DateTimeOffset Timestamp, double? DownloadBytesPerSecond, double? UploadBytesPerSecond);
@@ -45,6 +50,7 @@ public sealed record AppSettings
     public bool CloseToTray { get; init; } = true;
     public string Theme { get; init; } = "System";
     public string DiagnosticTarget { get; init; } = "1.1.1.1";
+    public string SpeedTestEndpoint { get; init; } = "";
     public int QuietStartHour { get; init; } = 22;
     public int QuietEndHour { get; init; } = 7;
     public bool QuietHoursEnabled { get; init; }
@@ -57,6 +63,7 @@ public sealed record AppSettings
     public string[] TrustedApplications { get; init; } = [];
     public void Validate()
     {
+        _ = SpeedTestProvider.Resolve(SpeedTestEndpoint);
         if (RetentionDays is < 1 or > 3650) throw new ArgumentException("Retention must be between 1 and 3650 days.");
         if (Theme is not ("System" or "Light" or "Dark")) throw new ArgumentException("Choose System, Light or Dark theme.");
         if (QuietStartHour is < 0 or > 23 || QuietEndHour is < 0 or > 23) throw new ArgumentException("Quiet hours must be 0–23.");
@@ -76,9 +83,12 @@ public interface IHistoryStore
     Task SaveSettingsAsync(AppSettings settings, CancellationToken token);
     Task SaveAsync(MonitoringSnapshot snapshot, IReadOnlyList<ConnectionEvent> events, CancellationToken token);
     Task<IReadOnlyList<UsageSummary>> GetUsageAsync(DateTimeOffset from, CancellationToken token);
+    Task<UsageReport> GetUsageReportAsync(UsageReportRange range, CancellationToken token);
     Task<IReadOnlyList<HistoryPoint>> GetHistoryAsync(string adapterId, DateTimeOffset from, CancellationToken token);
     Task<IReadOnlyList<ConnectionEvent>> GetEventsAsync(CancellationToken token);
     Task SaveDiagnosticAsync(DiagnosticResult result, CancellationToken token);
+    Task SaveSpeedTestAsync(SpeedTestRecord result, CancellationToken token);
+    Task<IReadOnlyList<SpeedTestRecord>> GetSpeedTestsAsync(int limit, CancellationToken token);
     Task<int> CleanupAsync(int retentionDays, CancellationToken token);
     Task DeleteHistoryAsync(CancellationToken token);
     Task<string> CheckIntegrityAsync(CancellationToken token);

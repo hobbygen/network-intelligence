@@ -33,7 +33,7 @@
      <Button Grid.Column="1" x:Name="PauseButton" Content="Pause monitoring" Click="PauseClicked" VerticalAlignment="Center"/>
      <Button Grid.Column="2" Content="Export" Click="ExportClicked" VerticalAlignment="Center"/>
     </Grid>
-    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <ScrollViewer x:Name="PageScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
      <Grid>
       <StackPanel x:Name="DashboardPage" Spacing="18">
        <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -74,9 +74,69 @@
       </StackPanel>
       <StackPanel x:Name="PerformancePage" Spacing="16" Visibility="Collapsed">
        <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Target performance" FontSize="20"/><TextBlock Text="{Binding DiagnosticText}" TextWrapping="Wrap"/><Button Content="Open diagnostics" Click="OpenDiagnostics"/></StackPanel></Border>
-       <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Internet transfer test" FontSize="20"/><TextBlock Text="A manual HTTPS transfer test uses up to 25 MB download and 10 MB upload. The endpoint receives your public IP. Results measure this transfer, not your link capacity or a certified maximum speed." TextWrapping="Wrap"/><TextBox x:Name="SpeedEndpoint" Header="Provider base URL (Cloudflare-compatible)" Text="https://speed.cloudflare.com" MaxWidth="600" HorizontalAlignment="Left"/><Button x:Name="SpeedButton" Content="Run transfer test…" Click="SpeedClicked"/><TextBlock x:Name="SpeedResult" Text="Not run. Automatic testing is disabled." TextWrapping="Wrap"/></StackPanel></Border>
+       <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
+        <TextBlock Text="Internet speed test" FontSize="20"/>
+        <TextBlock x:Name="SpeedProviderText" Text="Automatic · Cloudflare" TextWrapping="Wrap"/>
+        <TextBlock Text="Uses up to 25 MB download and 10 MB random test upload, plus protocol overhead. The provider sees your public IP. No application data is uploaded. Charges may apply on metered connections." TextWrapping="Wrap" Style="{StaticResource Caption}"/>
+        <StackPanel Orientation="Horizontal" Spacing="10">
+         <Button x:Name="SpeedButton" Content="Start test" Click="SpeedClicked" Style="{StaticResource AccentButtonStyle}"/>
+         <Button x:Name="SpeedCancelButton" Content="Cancel" Click="CancelSpeedTest" IsEnabled="False"/>
+         <ProgressRing x:Name="SpeedSpinner" Width="22" Height="22" IsActive="False" AutomationProperties.Name="Speed test running"/>
+        </StackPanel>
+        <ProgressBar x:Name="SpeedProgress" Minimum="0" Maximum="100" Value="0" Visibility="Collapsed" AutomationProperties.Name="Speed test stage progress"/>
+        <TextBlock x:Name="SpeedStage" Text="Ready · runs only when you start a test" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+        <Grid ColumnSpacing="20">
+         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+         <StackPanel Spacing="4"><TextBlock Text="DOWNLOAD" Style="{StaticResource Caption}"/><TextBlock x:Name="SpeedDown" Text="—" FontSize="24"/><TextBlock Text="Mbps" Style="{StaticResource Caption}"/></StackPanel>
+         <StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="UPLOAD" Style="{StaticResource Caption}"/><TextBlock x:Name="SpeedUp" Text="—" FontSize="24"/><TextBlock Text="Mbps" Style="{StaticResource Caption}"/></StackPanel>
+         <StackPanel Grid.Column="2" Spacing="4"><TextBlock Text="HTTP LATENCY" Style="{StaticResource Caption}"/><TextBlock x:Name="SpeedLatency" Text="—" FontSize="24"/><TextBlock Text="ms · average" Style="{StaticResource Caption}"/></StackPanel>
+         <StackPanel Grid.Column="3" Spacing="4"><TextBlock Text="HTTP JITTER" Style="{StaticResource Caption}"/><TextBlock x:Name="SpeedJitter" Text="—" FontSize="24"/><TextBlock Text="ms · variation" Style="{StaticResource Caption}"/></StackPanel>
+        </Grid>
+        <TextBlock x:Name="SpeedResult" Text="Measures HTTPS transfer throughput, not maximum line speed. Packet loss is unavailable. Uses the system route, including any VPN or proxy." TextWrapping="Wrap" Style="{StaticResource Caption}"/>
+        <HyperlinkButton Content="Provider settings" Click="OpenSpeedSettings" Padding="0"/>
+       </StackPanel></Border>
+       <Expander x:Name="SpeedHistoryExpander" Header="Recent speed tests" HorizontalAlignment="Stretch"><StackPanel Spacing="10">
+        <TextBlock Text="Stored locally on this device only, never uploaded. Only completed runs are kept; cancelled, timed out or failed tests are discarded. Shows the last 10." TextWrapping="Wrap" Style="{StaticResource Caption}"/>
+        <ItemsControl ItemsSource="{Binding SpeedTests}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><TextBlock Text="{Binding}" TextWrapping="Wrap"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+       </StackPanel></Expander>
       </StackPanel>
-      <StackPanel x:Name="UsagePage" Spacing="16" Visibility="Collapsed"><TextBlock Text="Historical traffic · measured intervals only" FontSize="20"/><ComboBox x:Name="HistoryRange" Header="Time range" SelectedIndex="1" SelectionChanged="HistoryRangeChanged"><ComboBoxItem Content="Last 24 hours"/><ComboBoxItem Content="Last 7 days"/><ComboBoxItem Content="Last 30 days"/><ComboBoxItem Content="Last 365 days"/></ComboBox><Button Content="Refresh history" Click="RefreshHistory"/><TextBlock Text="Physical and virtual adapters may count the same traffic. Compare adapters individually; totals are not added together. Minute buckets are assigned by interval end time." TextWrapping="Wrap"/><ItemsControl ItemsSource="{Binding Usage}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,12"><TextBlock Text="{Binding}" TextWrapping="Wrap"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+      <StackPanel x:Name="UsagePage" Spacing="16" Visibility="Collapsed">
+       <StackPanel x:Name="UsageReportPanel" Spacing="16">
+        <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
+         <TextBlock Text="Usage reports" FontSize="20" FontWeight="SemiBold"/>
+         <Grid ColumnSpacing="16"><Grid.ColumnDefinitions><ColumnDefinition Width="210"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <ComboBox x:Name="ReportPeriodPicker" Header="Report period" SelectedIndex="2" SelectionChanged="ReportPeriodChanged" HorizontalAlignment="Stretch"><ComboBoxItem Content="Daily · today"/><ComboBoxItem Content="Weekly · this week"/><ComboBoxItem Content="Monthly · this month"/><ComboBoxItem Content="Custom dates"/><ComboBoxItem Content="Yearly · this year"/></ComboBox>
+          <ComboBox Grid.Column="1" x:Name="ReportAdapterPicker" Header="Adapter (reported separately)" ItemsSource="{Binding Adapters}" DisplayMemberPath="AdapterName" SelectionChanged="ReportAdapterChanged" HorizontalAlignment="Stretch"/>
+         </Grid>
+         <StackPanel x:Name="ReportCustomDates" Orientation="Horizontal" Spacing="16" Visibility="Collapsed"><CalendarDatePicker x:Name="ReportStartDate" Header="From" DateChanged="ReportDateChanged"/><CalendarDatePicker x:Name="ReportEndDate" Header="Through (inclusive)" DateChanged="ReportDateChanged"/></StackPanel>
+         <StackPanel Orientation="Horizontal" Spacing="10"><Button Content="Refresh report" Click="RefreshReportClicked"/><Button x:Name="ReportExportButton" Content="Export report…" Click="ExportReportClicked" IsEnabled="False"/><ProgressRing x:Name="ReportBusy" Width="22" Height="22" IsActive="False" AutomationProperties.Name="Loading usage report"/></StackPanel>
+         <TextBlock Text="{Binding PeriodText}" Style="{StaticResource Caption}"/>
+         <TextBlock x:Name="ReportStatus" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+        </StackPanel></Border>
+        <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
+         <Grid ColumnSpacing="20"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <StackPanel Spacing="4"><TextBlock Text="DOWNLOAD" Style="{StaticResource Caption}"/><TextBlock Text="{Binding Download}" FontSize="26" FontWeight="SemiBold"/></StackPanel>
+          <StackPanel Grid.Column="1" Spacing="4"><TextBlock Text="UPLOAD" Style="{StaticResource Caption}"/><TextBlock Text="{Binding Upload}" FontSize="26" FontWeight="SemiBold"/></StackPanel>
+          <StackPanel Grid.Column="2" Spacing="4"><TextBlock Text="RECORDED COVERAGE · APPROX." Style="{StaticResource Caption}"/><TextBlock Text="{Binding Coverage}" FontSize="26" FontWeight="SemiBold"/><TextBlock Text="{Binding CoverageText}" Style="{StaticResource Caption}"/></StackPanel>
+         </Grid>
+         <TextBlock Text="{Binding DataStatus}" TextWrapping="Wrap"/>
+         <TextBlock Text="Physical and virtual adapters can count the same traffic. Adapter totals are never added together. Coverage uses elapsed time only; missing intervals are not filled in." Style="{StaticResource Caption}"/>
+         <lvc:CartesianChart Series="{Binding Series}" XAxes="{Binding XAxes}" YAxes="{Binding YAxes}" Height="230" LegendPosition="Bottom" AutomationProperties.Name="Daily download and upload totals; unit, exact values and coverage are provided below"/>
+         <TextBlock Text="{Binding ChartNote}" Style="{StaticResource Caption}"/>
+        </StackPanel></Border>
+        <Border Style="{StaticResource Card}"><StackPanel Spacing="10">
+         <TextBlock Text="Highest-usage applications · all interfaces" FontSize="18" FontWeight="SemiBold"/>
+         <TextBlock Text="Independent of the adapter above. Grouped by process name, not stable application identity. Requires recorded traffic from the optional MonitoringService; byte accuracy is not certified for general use." Style="{StaticResource Caption}"/>
+         <TextBlock Text="{Binding AppStatus}" TextWrapping="Wrap"/>
+         <ItemsControl ItemsSource="{Binding Applications}"><ItemsControl.ItemTemplate><DataTemplate><Grid ColumnSpacing="16" Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Name}" TextWrapping="Wrap"/><TextBlock Grid.Column="1" Text="{Binding Usage}"/></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+        </StackPanel></Border>
+        <Expander x:Name="ReportDailyBreakdown" Header="Daily breakdown and coverage" HorizontalAlignment="Stretch"><StackPanel Spacing="10">
+         <TextBlock Text="Coverage is approximate at minute precision. Intervals are assigned by end time; midnight crossings are not split. No data may reflect monitoring downtime, retention or counter resets." Style="{StaticResource Caption}"/>
+         <ItemsControl ItemsSource="{Binding Days}"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,5" ColumnSpacing="12" RowSpacing="4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><TextBlock Text="{Binding Date}" FontWeight="SemiBold"/><StackPanel Grid.Column="1"><TextBlock Text="Download" Style="{StaticResource Caption}"/><TextBlock Text="{Binding Download}"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Upload" Style="{StaticResource Caption}"/><TextBlock Text="{Binding Upload}"/></StackPanel><StackPanel Grid.Column="3"><TextBlock Text="Coverage" Style="{StaticResource Caption}"/><TextBlock Text="{Binding Coverage}"/></StackPanel><TextBlock Grid.Row="1" Grid.ColumnSpan="4" Text="{Binding Status}" Style="{StaticResource Caption}"/></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+        </StackPanel></Expander>
+       </StackPanel>
+       <Expander Header="Raw history (legacy ranges)" HorizontalAlignment="Stretch">      <StackPanel Spacing="12"><TextBlock Text="Historical traffic · measured intervals only" FontSize="20"/><ComboBox x:Name="HistoryRange" Header="Time range" SelectedIndex="1" SelectionChanged="HistoryRangeChanged"><ComboBoxItem Content="Last 24 hours"/><ComboBoxItem Content="Last 7 days"/><ComboBoxItem Content="Last 30 days"/><ComboBoxItem Content="Last 365 days"/></ComboBox><Button Content="Refresh history" Click="RefreshHistory"/><Button Content="Export raw history…" Tag="RawUsage" Click="ExportClicked"/><TextBlock Text="Physical and virtual adapters may count the same traffic. Compare adapters individually; totals are not added together. Minute buckets are assigned by interval end time." TextWrapping="Wrap"/><ItemsControl ItemsSource="{Binding Usage}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,12"><TextBlock Text="{Binding}" TextWrapping="Wrap"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Expander>
+      </StackPanel>
       <StackPanel x:Name="ApplicationsPage" Spacing="16" Visibility="Collapsed">
        <InfoBar IsOpen="True" IsClosable="False" Severity="Informational" Title="Live bandwidth requires the optional monitoring service" Message="Off by default. Install and run NetworkIntelligence.MonitoringService (see README) to see live per-app download/upload bytes below. Its accuracy has only been validated for a single loopback connection — treat totals as indicative, not yet certified for general use."/>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="10">
@@ -86,7 +146,7 @@
        </StackPanel></Border>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="10">
         <TextBlock Text="Stored per-application history (optional)" FontSize="18" FontWeight="SemiBold"/>
-        <TextBlock Text="Same time range as Bandwidth and data · minute buckets grouped by process ID and name, not a stable app identity · refresh from Bandwidth and data or on next launch." Style="{StaticResource Caption}"/>
+        <TextBlock Text="Uses the Raw history range under Bandwidth and data · minute buckets grouped by process ID and name, not a stable app identity · refresh from Bandwidth and data or on next launch." Style="{StaticResource Caption}"/>
         <ItemsControl ItemsSource="{Binding AppUsage}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Margin="0,0,0,8"><TextBlock Text="{Binding}" TextWrapping="Wrap"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
        </StackPanel></Border>
        <TextBox x:Name="ApplicationSearch" PlaceholderText="Search application or PID" TextChanged="SearchChanged"/>
@@ -99,6 +159,15 @@
        <Border Style="{StaticResource Card}"><StackPanel Spacing="8"><TextBlock Text="Selected adapter configuration" FontSize="20"/><TextBlock Text="{Binding AddressDetail}" TextWrapping="Wrap"/><TextBlock Text="{Binding Gateway}" TextWrapping="Wrap"/><Button Content="Check database integrity" Click="IntegrityClicked"/></StackPanel></Border>
       </StackPanel>
       <StackPanel x:Name="SettingsPage" Spacing="18" Visibility="Collapsed">
+       <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
+        <TextBlock Text="Speed test provider" FontSize="20"/>
+        <TextBlock Text="Automatic selection uses Cloudflare; its network routes the test to a serving edge. To override it, enter a compatible HTTPS provider below and save settings. Tests never run automatically." TextWrapping="Wrap"/>
+        <TextBox x:Name="SpeedEndpoint" Header="Custom provider base URL (optional)" PlaceholderText="Automatic · Cloudflare"/>
+        <TextBlock Text="Custom providers must support GET /__down?bytes=… and POST /__up. Clear the field to restore automatic selection. The saved provider URL stays on this device." TextWrapping="Wrap" Style="{StaticResource Caption}"/>
+        <Button Content="Save provider" Click="SaveSpeedProvider"/>
+        <TextBlock x:Name="SpeedProviderStatus" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+        <StackPanel Orientation="Horizontal" Spacing="12"><HyperlinkButton Content="Cloudflare terms" NavigateUri="https://www.cloudflare.com/website-terms/"/><HyperlinkButton Content="Provider privacy" NavigateUri="https://www.cloudflare.com/privacypolicy/"/></StackPanel>
+       </StackPanel></Border>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Monitoring and appearance" FontSize="20"/><NumberBox x:Name="Retention" Header="History retention (days)" Minimum="1" Maximum="3650" Value="365" SpinButtonPlacementMode="Inline" Width="230" HorizontalAlignment="Left"/><ComboBox x:Name="ThemePicker" Header="Theme" SelectedIndex="0" SelectionChanged="ThemeChanged"><ComboBoxItem Content="System"/><ComboBoxItem Content="Light"/><ComboBoxItem Content="Dark"/></ComboBox><ToggleSwitch x:Name="CloseToTray" Header="Keep monitoring when the window closes" IsOn="True"/><TextBlock Text="When enabled, use the tray icon to reopen the window or Exit to stop monitoring. The app does not start automatically with Windows." TextWrapping="Wrap" Style="{StaticResource Caption}"/></StackPanel></Border>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Privacy" FontSize="20"/><ToggleSwitch x:Name="CollectAddresses" Header="Show local IP, gateway and DNS addresses"/><ToggleSwitch x:Name="CollectSsid" Header="Show Wi-Fi network name (SSID)"/><ToggleSwitch x:Name="CollectNames" Header="Show process names" IsOn="True"/><TextBlock Text="These details stay in live memory. Addresses, SSIDs, executable paths, remote destinations and application histories are not stored. Packet payloads are never collected." TextWrapping="Wrap"/></StackPanel></Border>
        <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Connection notifications" FontSize="20"/><ToggleSwitch x:Name="AlertsEnabled" Header="Notify about adapter disconnections" IsOn="True"/><ToggleSwitch x:Name="QuietEnabled" Header="Quiet hours"/><StackPanel Orientation="Horizontal" Spacing="12"><NumberBox x:Name="QuietStart" Header="Start hour" Minimum="0" Maximum="23" Value="22" Width="140"/><NumberBox x:Name="QuietEnd" Header="End hour" Minimum="0" Maximum="23" Value="7" Width="140"/></StackPanel><TextBlock Text="Local time · also gates anomaly notifications below · native tray notifications" Style="{StaticResource Caption}"/></StackPanel></Border>
@@ -123,7 +192,8 @@
          </StackPanel>
         </StackPanel>
         <TextBlock Text="Local Windows network monitoring, diagnostics and explainable per-application anomaly detection. No mandatory cloud service or external AI." TextWrapping="Wrap"/>
-        <TextBlock Text="Created by Naeem Ahmad" FontSize="16" FontWeight="SemiBold"/>
+        <TextBlock Text="Concept by Naeem Ahmad" FontSize="16" FontWeight="SemiBold"/>
+        <TextBlock Text="Created using Codex and Cloud Code" FontSize="16" TextWrapping="Wrap"/>
         <TextBlock Text="All monitoring, diagnostics and history stay on this device. See Settings for privacy controls and Diagnostics for advanced network tests." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
        </StackPanel></Border>
       </StackPanel>

@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 using NetworkIntelligence.Contracts;
 namespace NetworkIntelligence.Infrastructure;
 
-public static class ExportService
+public static partial class ExportService
 {
     public static async Task WriteUsageAsync(string path, IReadOnlyList<UsageSummary> rows, bool json, CancellationToken token)
     {

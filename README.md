@@ -12,11 +12,12 @@ Use the self-contained package in `artifacts/NetworkIntelligence-0.2.0-win-x64.z
 
 - WinUI 3 sidebar with nine pages, system/light/dark appearance, native tray and pause/resume.
 - Real adapter discovery, counter deltas, directional throughput, bounded LiveCharts graphs and session totals.
+- Daily, weekly, monthly, yearly and custom usage reports with per-adapter totals, recorded coverage, daily charts, application breakdown and CSV/JSON export.
 - Native Wi-Fi association details with denied/unavailable states.
 - IPv4/IPv6 TCP/UDP ownership and process-instance metadata, always available. Live and stored (minute-aggregated) per-app **byte accounting** when the separate optional MonitoringService is installed and running — off by default, not accuracy-certified beyond a narrow loopback test, grouping is by PID+process name rather than a stable app identity (see below).
 - Algorithmic per-application anomaly detection: learned baselines, independent download/upload evaluation, a learning period before any alert, sustained-duration + cooldown gating, trust exclusion, Dashboard alerts and a Settings sensitivity control — detection thresholds are provisional, not validated against a real false-positive rate (see below).
 - SQLite migrations, minute aggregates, connection events, configurable retention (365 days default), integrity check and explicit history deletion.
-- User-initiated DNS/ICMP diagnostics with cancellation; configurable manual HTTPS transfer test.
+- User-initiated DNS/ICMP diagnostics with cancellation; one-click bounded HTTPS speed test with automatic Cloudflare selection, progress, Cancel, HTTP latency/jitter, a saved provider override, and locally persisted history of completed runs.
 - Privacy controls, connection notifications with quiet hours/cooldown, CSV and JSON exports.
 - Layered Domain/Contracts/Application/Infrastructure/App projects, DI/options/logging, unit/integration tests and CI definition.
 
@@ -76,3 +77,12 @@ powershell -NoProfile -File scripts/service-uninstall.ps1
 The original requirements remain unchanged in `NETWORK_INTELLIGENCE.md`. Health scoring, signed installation and complete Windows 10 validation are still outstanding. Missing telemetry is displayed as unavailable.
 
 The elevated kernel-ETW mechanism for per-application byte accounting is validated (`docs/ETW_VALIDATION.md`), has a working `MonitoringService` with secure named-pipe IPC (`docs/DECISIONS.md` ADR-007), passed a controlled-traffic accuracy test at 1 MiB/100 MiB on loopback with 0% delta (`docs/ETW_ACCURACY.md`, ADR-008), is wired into the App's Application Usage page with persisted history (ADR-009/010), and now drives algorithmic anomaly detection (ADR-011) — learned baselines, trust exclusion, Dashboard alerts. Broader accuracy testing (concurrent processes, real adapters, UDP), code signing, a dedicated service account, stable application identity, and real false-positive-rate validation of the anomaly thresholds are still required before any of this is a fully certified feature.
+
+
+### Internet speed test
+
+Open **Network performance → Start test**. The app selects Cloudflare automatically and network routing chooses the serving edge. Each run requests 25 MB download and 10 MB random upload plus protocol overhead; the provider sees your public IP. Use **Cancel** beside Start test to stop. Tests never run automatically. A completed run is saved locally and listed under **Recent speed tests** (last 10); cancelled, timed-out or failed runs are never saved.
+
+To use your own compatible HTTPS endpoint, open **Settings → Speed test provider**, enter a base URL, and choose **Save provider**. It must implement `GET /__down?bytes=N` (including an empty response for zero bytes) and `POST /__up`. Clear the field and save to restore automatic selection. Redirects are not followed; rate-limited or failed tests are not automatically retried.
+
+Results show bounded HTTPS throughput, average HTTP latency and successive-sample HTTP jitter, not maximum line speed or ICMP ping. Packet loss is unavailable. The system route, including VPN/proxy, is used regardless of the adapter selected for monitoring. Results stay in the current session. See ADR-014 in `docs/DECISIONS.md` for provider sources and measurement limits.
